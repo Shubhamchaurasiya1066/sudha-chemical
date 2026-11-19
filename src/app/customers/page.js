@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 
-const STORAGE_KEY = "sudha_customers";
+const API_BASE = "/api/customers";
 
 const ITEM_OPTIONS = [
   "Sulphuric Acid (98%)",
@@ -119,6 +119,7 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState([]);
   const [isReady, setIsReady] = useState(false);
   const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
   
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -126,15 +127,23 @@ export default function CustomersPage() {
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState("");
 
-  useEffect(() => {
+  // ✅ API se data fetch karna
+  async function fetchCustomers() {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      setCustomers(Array.isArray(saved) ? saved : []);
-    } catch {
-      setCustomers([]);
+      const res = await fetch(API_BASE);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setCustomers(json.data);
+      }
+    } catch (err) {
+      console.error("Fetch error:", err);
     } finally {
       setIsReady(true);
     }
+  }
+
+  useEffect(() => {
+    fetchCustomers();
   }, []);
 
   useEffect(() => {
@@ -151,7 +160,6 @@ export default function CustomersPage() {
       ...(name === "customerType" && value === "Trader" 
           ? { 
               factoryAddress: "", 
-              // ✅ Trader select karne par teeno contacts clear ho jayenge
               storeContact: "",
               purchaseContact: "",
               accountsContact: "",
@@ -199,7 +207,6 @@ export default function CustomersPage() {
       next.alternateNumber = "Enter a valid 10-digit number.";
     }
 
-    // Teeno department numbers ki validation (sirf Manufacturer ke liye)
     if (form.customerType === "Manufacturer") {
       if (form.storeContact && !/^[0-9]{10}$/.test(form.storeContact.trim())) {
         next.storeContact = "Enter a valid 10-digit number.";
@@ -236,7 +243,8 @@ export default function CustomersPage() {
     return next;
   }
 
-  function handleSubmit(e) {
+  // ✅ Add / Update API se
+  async function handleSubmit(e) {
     e.preventDefault();
     const next = validate();
     setErrors(next);
@@ -246,34 +254,50 @@ export default function CustomersPage() {
       return;
     }
 
+    setSaving(true);
     try {
-      let updated;
       const finalItems = form.items.map(item => ({
         ...item,
         qty: form.customerType === "Manufacturer" ? item.qty : ""
       }));
 
+      const payload = { ...form, items: finalItems };
+
       if (editingId) {
-        updated = customers.map((c) => 
-          c.id === editingId ? { ...c, ...form, items: finalItems, updatedAt: new Date().toISOString() } : c
-        );
+        // UPDATE
+        const res = await fetch(`${API_BASE}?id=${editingId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          setNotice(json.message || "Update failed.");
+          return;
+        }
         setNotice("Customer updated successfully!");
       } else {
-        const newCustomer = {
-          ...form,
-          items: finalItems,
-          id: `${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          createdAt: new Date().toISOString(),
-        };
-        updated = [newCustomer, ...customers];
+        // ADD
+        const res = await fetch(API_BASE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          setNotice(json.message || "Save failed.");
+          return;
+        }
         setNotice("Customer added successfully!");
       }
-      
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      setCustomers(updated);
+
+      await fetchCustomers();
       closeForm();
-    } catch {
-      setErrors({ form: "Unable to save data. Please check browser storage." });
+    } catch (err) {
+      console.error(err);
+      setNotice("Server error. Please try again.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -281,7 +305,7 @@ export default function CustomersPage() {
     if (customer) {
       setForm({
         ...customer,
-        items: customer.items || [{ itemName: "", qty: "", unit: "KG" }]
+        items: customer.items?.length > 0 ? customer.items : [{ itemName: "", qty: "", unit: "KG" }]
       });
       setEditingId(customer.id);
     } else {
@@ -299,12 +323,17 @@ export default function CustomersPage() {
     setErrors({});
   }
 
-  function handleDelete(id) {
+  // ✅ Delete API se
+  async function handleDelete(id) {
     if (!window.confirm("Are you sure you want to delete this customer?")) return;
     try {
-      const updated = customers.filter((c) => c.id !== id);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      setCustomers(updated);
+      const res = await fetch(`${API_BASE}?id=${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setNotice(json.message || "Delete failed.");
+        return;
+      }
+      await fetchCustomers();
       setNotice("Customer deleted.");
     } catch {
       setNotice("Failed to delete.");
@@ -486,7 +515,6 @@ export default function CustomersPage() {
                   </select>
                 </div>
 
-                {/* ✅ DEPARTMENT SECTION: SIRF MANUFACTURER KE LIYE DIKHEGA */}
                 {form.customerType !== "Trader" && (
                   <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <label className="mb-3 block text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -646,8 +674,8 @@ export default function CustomersPage() {
 
               <div className="mt-8 flex justify-end gap-3 border-t border-slate-100 pt-5">
                 <button type="button" onClick={closeForm} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
-                <button type="submit" className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700">
-                  {editingId ? "Save Changes" : "Add Customer"}
+                <button type="submit" disabled={saving} className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
+                  {saving ? "Saving..." : (editingId ? "Save Changes" : "Add Customer")}
                 </button>
               </div>
             </form>

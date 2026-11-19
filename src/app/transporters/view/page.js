@@ -1,10 +1,9 @@
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-const STORAGE_KEY = "sudha_transporter_shipments";
+const API_BASE = "/api/transporters";
 
 const companies = [
   "Sudha Chemicals",
@@ -62,16 +61,26 @@ export default function ViewTransportersPage() {
   const [noticeType, setNoticeType] = useState("success");
   const [isReady, setIsReady] = useState(false);
 
-  useEffect(() => {
+  // 1. DATABASE SE DATA FETCH KARNA
+  async function fetchShipments() {
     try {
-      const saved = JSON.parse(
-        localStorage.getItem(STORAGE_KEY) || "[]"
-      );
-      setShipments(Array.isArray(saved) ? saved : []);
-    } catch {
+      const res = await fetch(API_BASE);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setShipments(json.data);
+      } else {
+        setShipments([]);
+      }
+    } catch (err) {
+      console.error(err);
       setShipments([]);
+    } finally {
+      setIsReady(true);
     }
-    setIsReady(true);
+  }
+
+  useEffect(() => {
+    fetchShipments();
   }, []);
 
   const filteredShipments = useMemo(() => {
@@ -132,138 +141,87 @@ export default function ViewTransportersPage() {
     setErrors({});
   }
 
-  function saveEdit(event) {
+  // 2. UPDATE SHIPMENT (API)
+  async function saveEdit(event) {
     event.preventDefault();
+      const nextErrors = {};
 
-    const nextErrors = {};
-
-    if (!form.transporterCode.trim()) {
-      nextErrors.transporterCode = "Transporter code is required.";
-    }
-
-    if (!form.transporterName.trim()) {
-      nextErrors.transporterName = "Transporter name is required.";
-    }
-
-    if (!form.contactPerson.trim()) {
-      nextErrors.contactPerson = "Contact person is required.";
-    }
-
-    if (!/^[0-9]{10}$/.test(form.mobile.trim())) {
-      nextErrors.mobile = "Enter a valid 10-digit mobile number.";
-    }
-
-    if (
-      form.email.trim() &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
-    ) {
-      nextErrors.email = "Enter a valid email address.";
-    }
-
-    if (!form.vehicleNumber.trim()) {
-      nextErrors.vehicleNumber = "Vehicle number is required.";
-    }
-
-    if (!form.fromCompany) {
-      nextErrors.fromCompany = "Select the source company.";
-    }
-
-    if (!form.toCompany) {
-      nextErrors.toCompany = "Select the destination company.";
-    }
-
-    if (
-      form.fromCompany &&
-      form.toCompany &&
-      form.fromCompany === form.toCompany
-    ) {
-      nextErrors.toCompany = "Companies must be different.";
-    }
-
-    if (!form.pickupLocation.trim()) {
-      nextErrors.pickupLocation = "Pickup location is required.";
-    }
-
-    if (!form.deliveryLocation.trim()) {
-      nextErrors.deliveryLocation = "Delivery location is required.";
-    }
-
-    if (!form.itemName.trim()) {
-      nextErrors.itemName = "Item name is required.";
-    }
-
-    if (form.qty === "" || !Number.isFinite(Number(form.qty)) || Number(form.qty) <= 0) {
-      nextErrors.qty = "Quantity must be greater than zero.";
-    }
-
-    if (form.freight === "" || !Number.isFinite(Number(form.freight)) || Number(form.freight) < 0) {
-      nextErrors.freight = "Enter a valid freight amount.";
-    }
-
-    if (
-      form.dispatchDate &&
-      form.expectedDelivery &&
-      form.expectedDelivery < form.dispatchDate
-    ) {
-      nextErrors.expectedDelivery = "Delivery cannot be before dispatch.";
-    }
+    if (!form.transporterCode.trim()) nextErrors.transporterCode = "Transporter code is required.";
+    if (!form.transporterName.trim()) nextErrors.transporterName = "Transporter name is required.";
+    if (!form.contactPerson.trim()) nextErrors.contactPerson = "Contact person is required.";
+    if (!/^[0-9]{10}$/.test(form.mobile.trim())) nextErrors.mobile = "Enter a valid 10-digit mobile number.";
+    if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) nextErrors.email = "Enter a valid email address.";
+    if (!form.vehicleNumber.trim()) nextErrors.vehicleNumber = "Vehicle number is required.";
+    if (!form.fromCompany) nextErrors.fromCompany = "Select the source company.";
+    if (!form.toCompany) nextErrors.toCompany = "Select the destination company.";
+    if (form.fromCompany && form.toCompany && form.fromCompany === form.toCompany) nextErrors.toCompany = "Companies must be different.";
+    if (!form.pickupLocation.trim()) nextErrors.pickupLocation = "Pickup location is required.";
+    if (!form.deliveryLocation.trim()) nextErrors.deliveryLocation = "Delivery location is required.";
+    if (!form.itemName.trim()) nextErrors.itemName = "Item name is required.";
+    if (form.qty === "" || !Number.isFinite(Number(form.qty)) || Number(form.qty) <= 0) nextErrors.qty = "Quantity must be greater than zero.";
+    if (form.freight === "" || !Number.isFinite(Number(form.freight)) || Number(form.freight) < 0) nextErrors.freight = "Enter a valid freight amount.";
+    if (form.dispatchDate && form.expectedDelivery && form.expectedDelivery < form.dispatchDate) nextErrors.expectedDelivery = "Delivery cannot be before dispatch.";
 
     setErrors(nextErrors);
 
     if (Object.keys(nextErrors).length > 0) {
-      showNotice("Please correct the highlighted fields.", "error");
-      return;
+        showNotice("Please correct the highlighted fields.", "error");
+        return;
     }
 
     try {
-      const updated = shipments.map((item) =>
-        item.id === editing.id
-          ? {
-              ...item,
-              ...form,
-              transporterCode: form.transporterCode.trim(),
-              transporterName: form.transporterName.trim(),
-              contactPerson: form.contactPerson.trim(),
-              mobile: form.mobile.trim(),
-              email: form.email.trim(),
-              vehicleNumber: form.vehicleNumber.trim(),
-              itemName: form.itemName.trim(),
-              qty: Number(form.qty),
-              freight: Number(form.freight),
-              updatedAt: new Date().toISOString(),
-            }
-          : item
-      );
+        const res = await fetch(`${API_BASE}?id=${editing.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(form),
+        });
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      setShipments(updated);
-      setEditing(null);
-      setForm(initialForm);
-      setErrors({});
-      showNotice("Shipment updated successfully!");
-    } catch {
-      showNotice("Unable to update shipment. Please try again.", "error");
+        const json = await res.json();
+
+        if (!res.ok || !json.success) {
+            showNotice(json.message || "Failed to update.", "error");
+            return;
+        }
+
+        await fetchShipments(); // API se data fetch karo
+        setEditing(null);
+        setForm(initialForm);
+        setErrors({});
+        showNotice("Updated successfully!");
+    } catch (err) {
+        console.error(err);
+        showNotice("Unable to update. Please try again.", "error");
     }
-  }
+}
 
-  function deleteShipment(id) {
-    if (!window.confirm("Are you sure you want to delete this shipment?")) {
-      return;
+  // 3. DELETE SHIPMENT (API)
+  async function deleteShipment(id) {
+    if (!window.confirm("Are you sure you want to delete this record?")) {
+        return;
     }
 
     try {
-      const updated = shipments.filter((item) => item.id !== id);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      setShipments(updated);
+        const res = await fetch(`${API_BASE}?id=${id}`, {
+            method: "DELETE",
+        });
 
-      if (selected?.id === id) setSelected(null);
-      if (editing?.id === id) cancelEdit();
+        const json = await res.json();
 
-      showNotice("Shipment deleted successfully.");
-    } catch {
-      showNotice("Unable to delete shipment.", "error");
+        if (!res.ok || !json.success) {
+            showNotice(json.message || "Unable to delete.", "error");
+            return;
+        }
+
+        await fetchShipments(); // API se data fetch karo
+        if (selected?.id === id) setSelected(null);
+        if (editing?.id === id) cancelEdit();
+
+        showNotice("Deleted successfully.");
+    } catch (err) {
+        console.error(err);
+        showNotice("Unable to delete.", "error");
     }
-  }
+}
 
   function printShipment(item) {
     const printWindow = window.open("", "_blank", "width=900,height=700");

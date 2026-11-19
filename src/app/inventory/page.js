@@ -1,10 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-
-const PURCHASE_KEY = "sudha_purchase_orders";
-const SALES_KEY = "sudha_sales_orders";
 
 function formatCurrency(value) {
   const amount = Number(value);
@@ -33,262 +30,273 @@ export default function InventoryPage() {
     profit: 0,
   });
   const [ready, setReady] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    try {
-      const purchases = JSON.parse(localStorage.getItem(PURCHASE_KEY) || "[]");
-      const sales = JSON.parse(localStorage.getItem(SALES_KEY) || "[]");
-
-      const itemMap = new Map();
-
-      const getKey = (itemName, unit) =>
-        `${String(itemName || "").trim().toLowerCase()}::${String(unit || "KG").toUpperCase()}`;
-
-      const ensureItem = (itemName, unit) => {
-        const key = getKey(itemName, unit);
-        if (!itemMap.has(key)) {
-          itemMap.set(key, {
-            itemName: String(itemName || "").trim(),
-            unit: String(unit || "KG").toUpperCase(),
-            purchaseQty: 0,
-            purchaseValue: 0,
-            saleQty: 0,
-            saleValue: 0,
-          });
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/reports');
+        
+        // ✅ Fix 1: Check if API returns valid JSON
+        const contentType = res.headers.get("content-type");
+        if (!res.ok || !contentType || !contentType.includes("application/json")) {
+          throw new Error("Session expire ho gaya hai ya API me error hai. Kripya page refresh karein.");
         }
-        return itemMap.get(key);
-      };
 
-      // Process Purchases
-      (Array.isArray(purchases) ? purchases : []).forEach((order) => {
-        if (!order.itemName) return;
-        const item = ensureItem(order.itemName, order.qtyUnit);
-        const qty = Number(order.qty) || 0;
-        const price = Number(order.billingPrice) || Number(order.actualPrice) || 0;
+        const data = await res.json();
 
-        item.purchaseQty += qty;
-        item.purchaseValue += qty * price;
-      });
+        // ✅ Fix 2: Ensure data is always an array
+        const purchases = Array.isArray(data.purchases) ? data.purchases : [];
+        const sales = Array.isArray(data.sales) ? data.sales : [];
 
-      // Process Sales
-      (Array.isArray(sales) ? sales : []).forEach((order) => {
-        if (!order.itemName) return;
-        if (order.status === "Cancelled") return;
+        const itemMap = new Map();
 
-        const item = ensureItem(order.itemName, order.qtyUnit);
-        const qty = Number(order.qty) || 0;
-        const price = Number(order.rate) || 0;
+        const getKey = (itemName, unit) =>
+          `${String(itemName || "Unknown").trim().toLowerCase()}::${String(unit || "KG").toUpperCase()}`;
 
-        item.saleQty += qty;
-        item.saleValue += qty * price;
-      });
-
-      // Calculate Averages, Remaining & Profit
-      const computed = Array.from(itemMap.values()).map((item) => {
-        const avgPurchaseRate = item.purchaseQty > 0 ? item.purchaseValue / item.purchaseQty : 0;
-        const avgSaleRate = item.saleQty > 0 ? item.saleValue / item.saleQty : 0;
-        const remainingQty = item.purchaseQty - item.saleQty;
-
-        // ✅ Remaining Average Cost calculation
-        const remainingPurchaseValue = item.purchaseValue - (item.saleQty * avgPurchaseRate);
-        const remainingAverageCost = remainingQty > 0 ? remainingPurchaseValue / remainingQty : 0;
-
-        const costOfGoodsSold = item.saleQty * avgPurchaseRate;
-        const profit = item.saleValue - costOfGoodsSold;
-
-        return {
-          ...item,
-          avgPurchaseRate,
-          avgSaleRate,
-          remainingQty,
-          remainingAverageCost,
-          profit,
+        const ensureItem = (itemName, unit) => {
+          const key = getKey(itemName, unit);
+          if (!itemMap.has(key)) {
+            itemMap.set(key, {
+              itemName: String(itemName || "Unknown Item").trim(),
+              unit: String(unit || "KG").toUpperCase(),
+              purchaseQty: 0,
+              purchaseValue: 0,
+              saleQty: 0,
+              saleValue: 0,
+            });
+          }
+          return itemMap.get(key);
         };
-      });
 
-      const grand = computed.reduce(
-        (acc, item) => ({
-          purchaseQty: acc.purchaseQty + item.purchaseQty,
-          purchaseValue: acc.purchaseValue + item.purchaseValue,
-          saleQty: acc.saleQty + item.saleQty,
-          saleValue: acc.saleValue + item.saleValue,
-          remainingQty: acc.remainingQty + item.remainingQty,
-          profit: acc.profit + item.profit,
-        }),
-        { purchaseQty: 0, purchaseValue: 0, saleQty: 0, saleValue: 0, remainingQty: 0, profit: 0 }
-      );
+        // Process Purchases
+        purchases.forEach((order) => {
+          if (!order || !order.itemName) return;
+          const item = ensureItem(order.itemName, order.qtyUnit);
+          const qty = Number(order.qty) || 0;
+          const price = Number(order.billingPrice) || Number(order.actualPrice) || 0;
 
-      setItems(computed);
-      setTotals(grand);
-    } catch {
-      setItems([]);
-    } finally {
-      setReady(true);
+          item.purchaseQty += qty;
+          item.purchaseValue += qty * price;
+        });
+
+        // Process Sales
+        sales.forEach((order) => {
+          if (!order || !order.itemName) return;
+          if (order.status === "Cancelled") return;
+
+          const item = ensureItem(order.itemName, order.qtyUnit);
+          const qty = Number(order.qty) || 0;
+          const price = Number(order.rate) || 0;
+
+          item.saleQty += qty;
+          item.saleValue += qty * price;
+        });
+
+        // Calculate Averages, Remaining & Profit
+        const computed = Array.from(itemMap.values()).map((item) => {
+          const avgPurchaseRate = item.purchaseQty > 0 ? item.purchaseValue / item.purchaseQty : 0;
+          const avgSaleRate = item.saleQty > 0 ? item.saleValue / item.saleQty : 0;
+          const remainingQty = item.purchaseQty - item.saleQty;
+
+          const remainingPurchaseValue = item.purchaseValue - (item.saleQty * avgPurchaseRate);
+          const remainingAverageCost = remainingQty > 0 ? remainingPurchaseValue / remainingQty : 0;
+
+          const costOfGoodsSold = item.saleQty * avgPurchaseRate;
+          const profit = item.saleValue - costOfGoodsSold;
+
+          return {
+            ...item,
+            avgPurchaseRate,
+            avgSaleRate,
+            remainingQty,
+            remainingAverageCost,
+            profit,
+          };
+        });
+
+        const grand = computed.reduce(
+          (acc, item) => ({
+            purchaseQty: acc.purchaseQty + item.purchaseQty,
+            purchaseValue: acc.purchaseValue + item.purchaseValue,
+            saleQty: acc.saleQty + item.saleQty,
+            saleValue: acc.saleValue + item.saleValue,
+            remainingQty: acc.remainingQty + item.remainingQty,
+            profit: acc.profit + item.profit,
+          }),
+          { purchaseQty: 0, purchaseValue: 0, saleQty: 0, saleValue: 0, remainingQty: 0, profit: 0 }
+        );
+
+        setItems(computed);
+        setTotals(grand);
+      } catch (error) {
+        console.error("Failed to load inventory:", error);
+        setErrorMsg(error.message || "Data load karne me dikkat aayi.");
+      } finally {
+        setReady(true);
+      }
     }
+
+    fetchData();
   }, []);
 
-  const filtered = items.filter((item) => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return item.itemName.toLowerCase().includes(q);
-  });
+    if (!q) return items;
+    return items.filter((item) => 
+      (item.itemName || "").toLowerCase().includes(q) || 
+      (item.unit || "").toLowerCase().includes(q)
+    );
+  }, [items, search]);
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-900">
-      <header className="bg-slate-950 text-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-6 sm:flex-row sm:items-center sm:justify-between lg:px-8">
+    <main className="min-h-screen bg-slate-50 text-slate-900">
+      {/* Header */}
+      <header className="bg-slate-950 text-white sticky top-0 z-10 shadow-md">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-xl font-black shadow-lg shadow-emerald-500/20">
+            <Link href="/" className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-lg font-black shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 transition">
               S
-            </div>
+            </Link>
             <div>
-              <p className="text-lg font-bold tracking-wide">SUDHA CHEMICALS</p>
-              <p className="text-xs text-slate-400">Inventory & Stock Management</p>
+              <p className="text-lg font-bold tracking-wide">Inventory & Stock</p>
+              <p className="text-xs text-slate-400">Live Business Data</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Link href="/company-purchases" className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-violet-500">
-              🏢 Company Purchases
+          <div className="flex flex-wrap gap-2">
+            <Link href="/sheet" className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold hover:bg-slate-700 transition">
+              📊 Order Book
             </Link>
-            <Link href="/company-sales" className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-500">
-              🏢 Company Sales
-            </Link>
-            <Link href="/sheet" className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-500">
-              📊 View Sheet
-            </Link>
-            <Link href="/dispatch-order" className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-amber-500">
-              🚚 Dispatch
-            </Link>
-            <Link href="/purchase-order" className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-500">
+            <Link href="/purchase-order" className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold hover:bg-violet-500 transition">
               + Purchase
             </Link>
-            <Link href="/sales-order" className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500">
+            <Link href="/sales-order" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold hover:bg-blue-500 transition">
               + Sale
-            </Link>
-            <Link href="/purchase-orders" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold transition hover:bg-slate-900">
-              View Purchases
-            </Link>
-            <Link href="/sales-orders" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold transition hover:bg-slate-900">
-              View Sales
             </Link>
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        
         <div className="mb-8">
-          <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
-            Inventory Dashboard
-          </p>
-          <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
-            Stock & Profit Summary
-          </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Item-wise purchase, sale, average rates, remaining stock and profit overview.
-          </p>
+          <h1 className="text-2xl font-black tracking-tight text-slate-800">Stock & Profit Summary</h1>
+          <p className="mt-1 text-sm text-slate-500">Item-wise purchase, sale, remaining stock, and profit overview.</p>
         </div>
+
+        {/* Error Message Display */}
+        {errorMsg && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
+            ⚠️ {errorMsg}
+          </div>
+        )}
 
         {/* Summary Cards */}
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">Total Purchase Value</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Purchase</p>
             <p className="mt-2 text-2xl font-black text-violet-700">{formatCurrency(totals.purchaseValue)}</p>
-            <p className="mt-1 text-xs text-slate-400">{formatQty(totals.purchaseQty)} total qty</p>
+            <p className="mt-1 text-xs font-semibold text-slate-400">{formatQty(totals.purchaseQty)} Total Qty</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">Total Sale Value</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Sale</p>
             <p className="mt-2 text-2xl font-black text-blue-700">{formatCurrency(totals.saleValue)}</p>
-            <p className="mt-1 text-xs text-slate-400">{formatQty(totals.saleQty)} total qty</p>
+            <p className="mt-1 text-xs font-semibold text-slate-400">{formatQty(totals.saleQty)} Total Qty</p>
           </div>
           <div className={`rounded-2xl border p-5 shadow-sm ${totals.remainingQty >= 0 ? "border-slate-200 bg-white" : "border-red-200 bg-red-50"}`}>
-            <p className={`text-sm font-medium ${totals.remainingQty >= 0 ? "text-slate-500" : "text-red-700"}`}>Remaining Stock</p>
-            <p className={`mt-2 text-2xl font-black ${totals.remainingQty >= 0 ? "text-amber-700" : "text-red-700"}`}>{formatQty(totals.remainingQty)}</p>
-            <p className="mt-1 text-xs text-slate-400">Across all items</p>
+            <p className={`text-xs font-bold uppercase tracking-wider ${totals.remainingQty >= 0 ? "text-slate-500" : "text-red-700"}`}>Remaining Stock</p>
+            <p className={`mt-2 text-2xl font-black ${totals.remainingQty >= 0 ? "text-amber-600" : "text-red-700"}`}>{formatQty(totals.remainingQty)}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-400">Across all items</p>
           </div>
           <div className={`rounded-2xl border p-5 shadow-sm ${totals.profit >= 0 ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
-            <p className={`text-sm font-medium ${totals.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+            <p className={`text-xs font-bold uppercase tracking-wider ${totals.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
               {totals.profit >= 0 ? "Estimated Profit" : "Estimated Loss"}
             </p>
             <p className={`mt-2 text-2xl font-black ${totals.profit >= 0 ? "text-emerald-800" : "text-red-800"}`}>
               {formatCurrency(Math.abs(totals.profit))}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Sale - Cost of Goods Sold</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Sale - Cost</p>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search item name..."
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 sm:max-w-sm"
+            placeholder="🔍 Search by Item Name or Unit..."
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 sm:max-w-md shadow-sm"
           />
         </div>
 
         {/* Table */}
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/50">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
           {!ready ? (
-            <div className="p-12 text-center text-sm text-slate-500">Loading inventory...</div>
+            <div className="p-12 text-center text-sm font-bold text-slate-400 animate-pulse">Loading inventory data...</div>
           ) : filtered.length === 0 ? (
             <div className="px-6 py-16 text-center">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-3xl">📦</div>
-              <h3 className="mt-5 text-lg font-bold">No inventory data</h3>
-              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-                Create purchase orders and sales orders to see the summary here.
-              </p>
+              <h3 className="mt-5 text-lg font-bold text-slate-700">No inventory data found</h3>
+              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">Create purchase orders and sales orders to see the summary here.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1300px] text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+              <table className="w-full min-w-[1200px] text-left text-sm whitespace-nowrap">
+                <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                   <tr>
-                    <th className="px-5 py-4 font-bold">Item</th>
-                    <th className="px-5 py-4 font-bold text-right">Pur. Qty</th>
-                    <th className="px-5 py-4 font-bold text-right">Avg Pur. Rate</th>
-                    <th className="px-5 py-4 font-bold text-right">Pur. Value</th>
-                    <th className="px-5 py-4 font-bold text-right">Sale Qty</th>
-                    <th className="px-5 py-4 font-bold text-right">Avg Sale Rate</th>
-                    <th className="px-5 py-4 font-bold text-right">Sale Value</th>
-                    <th className="px-5 py-4 font-bold text-right text-amber-700 bg-amber-50">Remaining Avg Rate</th>
-                    <th className="px-5 py-4 font-bold text-right">Remaining</th>
-                    <th className="px-5 py-4 font-bold text-right">Profit/Loss</th>
+                    <th className="px-5 py-4 font-bold">Item Details</th>
+                    <th className="px-5 py-4 font-bold text-right bg-violet-50/50">Pur. Qty</th>
+                    <th className="px-5 py-4 font-bold text-right bg-violet-50/50">Avg Pur. Rate</th>
+                    <th className="px-5 py-4 font-bold text-right bg-violet-50/50">Pur. Value</th>
+                    <th className="px-5 py-4 font-bold text-right bg-blue-50/50">Sale Qty</th>
+                    <th className="px-5 py-4 font-bold text-right bg-blue-50/50">Avg Sale Rate</th>
+                    <th className="px-5 py-4 font-bold text-right bg-blue-50/50">Sale Value</th>
+                    <th className="px-5 py-4 font-bold text-right bg-amber-50">Remaining Rate</th>
+                    <th className="px-5 py-4 font-bold text-right bg-amber-50">Stock Left</th>
+                    <th className="px-5 py-4 font-bold text-right bg-emerald-50/50">Profit/Loss</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filtered.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50">
+                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
                       <td className="px-5 py-4">
-                        <p className="font-bold text-slate-800">{item.itemName}</p>
-                        <p className="text-xs text-slate-400">Unit: {item.unit}</p>
+                        <p className="font-bold text-slate-800 text-base">{item.itemName}</p>
+                        <p className="text-xs font-semibold text-slate-400 mt-0.5">Unit: {item.unit}</p>
                       </td>
-                      <td className="px-5 py-4 text-right tabular-nums">
-                        {formatQty(item.purchaseQty)} {item.unit}
+                      
+                      {/* Purchase Data */}
+                      <td className="px-5 py-4 text-right tabular-nums bg-violet-50/30">
+                        {formatQty(item.purchaseQty)}
                       </td>
-                      <td className="px-5 py-4 text-right tabular-nums text-slate-600">
+                      <td className="px-5 py-4 text-right tabular-nums text-slate-500 bg-violet-50/30">
                         {formatCurrency(item.avgPurchaseRate)}
                       </td>
-                      <td className="px-5 py-4 text-right tabular-nums font-semibold">
+                      <td className="px-5 py-4 text-right tabular-nums font-semibold text-slate-700 bg-violet-50/30">
                         {formatCurrency(item.purchaseValue)}
                       </td>
-                      <td className="px-5 py-4 text-right tabular-nums">
-                        {formatQty(item.saleQty)} {item.unit}
+
+                      {/* Sale Data */}
+                      <td className="px-5 py-4 text-right tabular-nums bg-blue-50/30">
+                        {formatQty(item.saleQty)}
                       </td>
-                      <td className="px-5 py-4 text-right tabular-nums text-slate-600">
+                      <td className="px-5 py-4 text-right tabular-nums text-slate-500 bg-blue-50/30">
                         {formatCurrency(item.avgSaleRate)}
                       </td>
-                      <td className="px-5 py-4 text-right tabular-nums font-semibold">
+                      <td className="px-5 py-4 text-right tabular-nums font-semibold text-slate-700 bg-blue-50/30">
                         {formatCurrency(item.saleValue)}
                       </td>
-                      {/* ✅ Naya Column Remaining Average Rate */}
-                      <td className="px-5 py-4 text-right tabular-nums font-bold text-amber-700 bg-amber-50">
+
+                      {/* Remaining Data */}
+                      <td className="px-5 py-4 text-right tabular-nums text-amber-600 bg-amber-50/30">
                         {item.remainingQty > 0 ? formatCurrency(item.remainingAverageCost) : "—"}
                       </td>
-                      <td className={`px-5 py-4 text-right tabular-nums font-bold ${item.remainingQty > 0 ? "text-amber-700" : item.remainingQty < 0 ? "text-red-600" : "text-slate-500"}`}>
-                        {formatQty(item.remainingQty)} {item.unit}
+                      <td className={`px-5 py-4 text-right tabular-nums font-bold text-base bg-amber-50/30 ${item.remainingQty > 0 ? "text-amber-600" : item.remainingQty < 0 ? "text-red-600" : "text-slate-500"}`}>
+                        {formatQty(item.remainingQty)}
                       </td>
-                      <td className={`px-5 py-4 text-right tabular-nums font-bold ${item.profit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+
+                      {/* Profit */}
+                      <td className={`px-5 py-4 text-right tabular-nums font-bold bg-emerald-50/30 ${item.profit > 0 ? "text-emerald-600" : item.profit < 0 ? "text-red-600" : "text-slate-500"}`}>
                         {formatCurrency(item.profit)}
                       </td>
                     </tr>
@@ -299,7 +307,7 @@ export default function InventoryPage() {
           )}
         </section>
 
-        <p className="mt-5 text-center text-xs text-slate-400">
+        <p className="mt-6 text-center text-xs font-semibold text-slate-400">
           Sudha Chemicals · Inventory Management
         </p>
       </div>

@@ -1,561 +1,471 @@
 "use client";
 
-import { useEffect, useMemo, useState, Fragment } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-const PURCHASE_KEY = "sudha_purchase_orders";
-const SALES_KEY = "sudha_sales_orders";
-
-function formatNumber(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num === 0) return "0";
-    return num.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+// Helper Functions
+function formatCurrency(v) {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(Number(v) || 0);
+}
+function formatNum(v) {
+  return Number(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
-function formatCurrency(value) {
-    const amount = Number(value);
-    if (!Number.isFinite(amount)) return "₹0.00";
-    return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency: "INR",
-        maximumFractionDigits: 2,
-    }).format(amount);
+// ✅ Reliable Date Formatter
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  const str = String(dateStr).trim();
+  
+  const ymd = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymd) return `${ymd[3]}/${ymd[2]}/${ymd[1]}`;
+  
+  const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dmy) return `${dmy[1].padStart(2, '0')}/${dmy[2].padStart(2, '0')}/${dmy[3]}`;
+
+  try {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+  } catch (e) {}
+
+  return str.split(/[ ,]+/)[0];
 }
 
-// Group array by a key function
-function groupBy(array, keyFn) {
-    const map = new Map();
-    array.forEach((item) => {
-        const key = keyFn(item);
-        if (!map.has(key)) map.set(key, []);
-        map.get(key).push(item);
-    });
-    return Array.from(map.entries()).map(([key, items]) => ({ key, items }));
+function isDateInRange(dateStr, from, to) {
+  if (!dateStr) return true;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return true;
+  
+  if (from) {
+    const fromDate = new Date(from);
+    fromDate.setHours(0, 0, 0, 0);
+    if (d < fromDate) return false;
+  }
+  if (to) {
+    const toDate = new Date(to);
+    toDate.setHours(23, 59, 59, 999);
+    if (d > toDate) return false;
+  }
+  return true;
 }
 
 export default function SheetPage() {
-    const [purchases, setPurchases] = useState([]);
-    const [sales, setSales] = useState([]);
-    const [ready, setReady] = useState(false);
-    const [openProducts, setOpenProducts] = useState({});
+  const [purchases, setPurchases] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [openGroups, setOpenGroups] = useState({});
 
-    useEffect(() => {
-        try {
-            const p = JSON.parse(localStorage.getItem(PURCHASE_KEY) || "[]");
-            const s = JSON.parse(localStorage.getItem(SALES_KEY) || "[]");
-            setPurchases(Array.isArray(p) ? p : []);
-            setSales(Array.isArray(s) ? s : []);
-        } catch {
-            setPurchases([]);
-            setSales([]);
-        } finally {
-            setReady(true);
-        }
-    }, []);
+  const [search, setSearch] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
-    // ---------- Product-wise calculation ----------
-    const products = useMemo(() => {
-        const map = new Map();
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/reports');
+        const data = await res.json();
+        setPurchases(data.purchases || []);
+        setSales(data.sales || []);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setReady(true);
+      }
+    }
+    fetchData();
+  }, []);
 
-        const ensure = (itemName, unit) => {
-            const key = `${String(itemName || "").trim().toLowerCase()}::${String(unit || "KG").toUpperCase()}`;
-            if (!map.has(key)) {
-                map.set(key, {
-                    key,
-                    itemName: String(itemName || "").trim(),
-                    unit: String(unit || "KG").toUpperCase(),
-                    purchaseQty: 0,
-                    purchaseValue: 0,
-                    saleQty: 0,
-                    saleValue: 0,
-                    purchaseRecords: [],
-                    saleRecords: [],
-                });
-            }
-            return map.get(key);
-        };
+  const companyList = useMemo(() => {
+    const set = new Set();
+    purchases.forEach(p => { if (p.manufacturerName) set.add(p.manufacturerName); });
+    sales.forEach(s => { if (s.manufacturerName) set.add(s.manufacturerName); });
+    return Array.from(set).sort();
+  }, [purchases, sales]);
 
-        // ----- Purchases -----
-        purchases.forEach((p) => {
-            if (!p.itemName) return;
+  const filteredPurchases = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return purchases.filter(p => {
+      const matchSearch = !q || 
+        (p.manufacturerName || "").toLowerCase().includes(q) ||
+        (p.place || "").toLowerCase().includes(q) ||
+        (p.purchaseOrderNumber || "").toLowerCase().includes(q) ||
+        (p.itemName || "").toLowerCase().includes(q);
+      
+      const matchCompany = !companyFilter || p.manufacturerName === companyFilter;
+      const matchDate = isDateInRange(p.orderDate, fromDate, toDate);
+      
+      return matchSearch && matchCompany && matchDate;
+    });
+  }, [purchases, search, companyFilter, fromDate, toDate]);
 
-            const item = ensure(p.itemName, p.qtyUnit);
-            const qty = Number(p.qty) || 0;
-            
-            // ✅ Billing Price use kar rahe hain, agar nahi hai to Actual Price
-            const price = Number(p.billingPrice) || Number(p.actualPrice) || 0;
+  const filteredSales = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return sales.filter(s => {
+      const matchSearch = !q || 
+        (s.manufacturerName || "").toLowerCase().includes(q) ||
+        (s.place || "").toLowerCase().includes(q) ||
+        (s.orderNumber || "").toLowerCase().includes(q) ||
+        (s.customerName || "").toLowerCase().includes(q) ||
+        (s.brokerName || "").toLowerCase().includes(q) ||
+        (s.itemName || "").toLowerCase().includes(q);
+      
+      const matchCompany = !companyFilter || s.manufacturerName === companyFilter;
+      const matchDate = isDateInRange(s.orderDate, fromDate, toDate);
+      
+      return matchSearch && matchCompany && matchDate;
+    });
+  }, [sales, search, companyFilter, fromDate, toDate]);
 
-            item.purchaseQty += qty;
-            item.purchaseValue += qty * price;
+  const excelGroups = useMemo(() => {
+    const map = new Map();
 
-            // Save raw record for breakdown
-            item.purchaseRecords.push({
-                id: p.id,
-                company: p.manufacturerName || "Unknown Company",
-                poNumber: p.purchaseOrderNumber || "",
-                qty,
-                rate: price,
-                total: qty * price,
-                unit: p.qtyUnit || "KG",
-                date: p.orderDate || "",
-                place: p.place || "",
-                broker: p.brokerName || "",
-                freight: Number(p.freight) || 0,
-            });
+    // ✅ NAYA: Group key me Product aur Unit bhi add kiya
+    const getGroup = (m, p, item, unit) => {
+      const key = `${m || "Unknown"}::${p || "No Place"}::${item || "Unknown Item"}::${unit || "KG"}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          manufacturer: m || "Unknown Company",
+          place: p || "",
+          itemName: item || "Unknown Product",
+          unit: unit || "KG",
+          purchases: [],
+          sales: [],
+          totalPurchaseQty: 0, totalPurchaseValue: 0,
+          totalSaleQty: 0, totalSaleValue: 0,
         });
+      }
+      return map.get(key);
+    };
 
-        // ----- Sales -----
-        sales.forEach((s) => {
-            if (!s.itemName) return;
-            if (s.status === "Cancelled") return; // Sale me status abhi bhi ho sakta hai
+    filteredPurchases.forEach(item => {
+      const group = getGroup(item.manufacturerName, item.place, item.itemName, item.qtyUnit);
+      const qty = Number(item.qty) || 0;
+      const rate = Number(item.billingPrice) || Number(item.actualPrice) || 0;
+      const total = qty * rate;
+      
+      group.purchases.push({ ...item, calcRate: rate, calcTotal: total });
+      group.totalPurchaseQty += qty;
+      group.totalPurchaseValue += total;
+    });
 
-            const item = ensure(s.itemName, s.qtyUnit);
-            const qty = Number(s.qty) || 0;
-            const price = Number(s.rate) || 0;
+    filteredSales.forEach(item => {
+      const group = getGroup(item.manufacturerName, item.place, item.itemName, item.qtyUnit);
+      const qty = Number(item.qty) || 0;
+      const rate = Number(item.rate) || 0;
+      const total = qty * rate;
 
-            item.saleQty += qty;
-            item.saleValue += qty * price;
+      group.sales.push({ ...item, calcRate: rate, calcTotal: total });
+      group.totalSaleQty += qty;
+      group.totalSaleValue += total;
+    });
 
-            item.saleRecords.push({
-                id: s.id,
-                company: s.companyName || "Unknown Company",
-                orderNumber: s.orderNumber || "",
-                customer: s.customerName || "",
-                customerNumber: s.customerNumber || "",
-                qty,
-                rate: price,
-                total: qty * price,
-                unit: s.qtyUnit || "KG",
-                date: s.orderDate || "",
-                status: s.status || "Pending",
-                place: s.place || "",
-                paymentTerms: s.paymentTerms || "",
-                filledBy: s.filledBy || "",
-                freight: Number(s.freight) || 0,
-            });
-        });
+    return Array.from(map.values()).sort((a, b) => {
+      // Pehle manufacturer se sort karo
+      if (a.manufacturer !== b.manufacturer) {
+        return a.manufacturer.localeCompare(b.manufacturer);
+      }
+      // Phir item name se sort karo
+      return a.itemName.localeCompare(b.itemName);
+    });
+  }, [filteredPurchases, filteredSales]);
 
-        // ----- Averages, remaining, profit -----
-        return Array.from(map.values()).map((item) => {
-            const avgPurchaseRate =
-                item.purchaseQty > 0 ? item.purchaseValue / item.purchaseQty : 0;
-            const avgSaleRate =
-                item.saleQty > 0 ? item.saleValue / item.saleQty : 0;
-            const remainingQty = item.purchaseQty - item.saleQty;
-            const costOfGoodsSold = item.saleQty * avgPurchaseRate;
-            const profit = item.saleValue - costOfGoodsSold;
+  const toggleGroup = (key) => setOpenGroups(prev => ({ ...prev, [key]: !prev[key] }));
 
-            return {
-                ...item,
-                avgPurchaseRate,
-                avgSaleRate,
-                remainingQty,
-                profit,
-            };
-        });
-    }, [purchases, sales]);
+  function resetFilters() {
+    setSearch("");
+    setCompanyFilter("");
+    setFromDate("");
+    setToDate("");
+  }
 
-    // ---------- Grand totals ----------
-    const grandTotals = useMemo(() => {
-        return products.reduce(
-            (acc, item) => ({
-                purchaseValue: acc.purchaseValue + item.purchaseValue,
-                saleValue: acc.saleValue + item.saleValue,
-                profit: acc.profit + item.profit,
-            }),
-            { purchaseValue: 0, saleValue: 0, profit: 0 }
-        );
-    }, [products]);
+  // --- CSV HELPERS ---
+  function generateCSV(rows) {
+    const escapeCSV = (val) => {
+      const str = String(val ?? "");
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+    const csv = rows.map(row => row.map(escapeCSV).join(",")).join("\r\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    return url;
+  }
 
-    function toggleProduct(key) {
-        setOpenProducts((prev) => ({ ...prev, [key]: !prev[key] }));
+  function downloadCSV(url, filename) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function getGroupCSVRows(group, isGlobalExport = false) {
+    const rows = [];
+    
+    if (isGlobalExport) {
+      rows.push([`${group.manufacturer} ${group.place ? `- ${group.place}` : ""} (${group.itemName} - ${group.unit})`]);
+    }
+    rows.push(["PURCHASE", "", "", "", "", "", "SALE", "", "", "", "", ""]);
+    rows.push(["DATE", "PO NO", "QTY", "BASIC", "TOTAL", "", "DATE", "SALE NO", "CUSTOMER", "QTY", "BASIC", "TOTAL", "BROKER"]);
+
+    const maxLen = Math.max(group.purchases.length, group.sales.length);
+    for (let i = 0; i < maxLen; i++) {
+      const p = group.purchases[i];
+      const s = group.sales[i];
+      
+      rows.push([
+        formatDate(p?.orderDate),
+        p?.purchaseOrderNumber || "",
+        p?.qty ? Number(p.qty) : "",
+        p?.calcRate ? Number(p.calcRate) : "",
+        p?.calcTotal ? Number(p.calcTotal) : "",
+        "", 
+        formatDate(s?.orderDate),
+        s?.orderNumber || "",
+        s?.customerName || "",
+        s?.qty ? Number(s.qty) : "",
+        s?.calcRate ? Number(s.calcRate) : "",
+        s?.calcTotal ? Number(s.calcTotal) : "",
+        s?.brokerName || ""
+      ]);
     }
 
-    function exportCSV() {
-        const headers = [
-            "PRODUCT", "UNIT",
-            "PURCHASE QTY", "AVG PURCHASE RATE", "PURCHASE VALUE",
-            "SALE QTY", "AVG SALE RATE", "SALE VALUE",
-            "REMAINING QTY", "PROFIT/LOSS",
-        ];
+    const avgPurchaseRate = group.totalPurchaseQty > 0 ? group.totalPurchaseValue / group.totalPurchaseQty : 0;
+    const avgSaleRate = group.totalSaleQty > 0 ? group.totalSaleValue / group.totalSaleQty : 0;
+    const balanceQty = group.totalPurchaseQty - group.totalSaleQty;
+    const profit = group.totalSaleValue - (group.totalSaleQty * avgPurchaseRate);
 
-        const rows = products.map((item) => [
-            item.itemName,
-            item.unit,
-            item.purchaseQty,
-            item.avgPurchaseRate.toFixed(2),
-            item.purchaseValue.toFixed(2),
-            item.saleQty,
-            item.avgSaleRate.toFixed(2),
-            item.saleValue.toFixed(2),
-            item.remainingQty,
-            item.profit.toFixed(2),
-        ]);
+    rows.push([]); 
+    rows.push([
+      "TOTAL QTY:", "", group.totalPurchaseQty, `AVG: ${avgPurchaseRate.toFixed(2)}`, group.totalPurchaseValue, "",
+      "TOTAL QTY:", "", "", group.totalSaleQty, `AVG: ${avgSaleRate.toFixed(2)}`, group.totalSaleValue, ""
+    ]);
+    rows.push([
+      "BALANCE QTY:", "", balanceQty, "", "", "",
+      "PROFIT/LOSS:", "", "", "", "", profit.toFixed(2), ""
+    ]);
 
-        rows.push([]);
-        rows.push([
-            "GRAND TOTAL", "",
-            "", "",
-            grandTotals.purchaseValue.toFixed(2),
-            "", "",
-            grandTotals.saleValue.toFixed(2),
-            "",
-            grandTotals.profit.toFixed(2),
-        ]);
-
-        const escapeCSV = (value) => {
-            const str = String(value ?? "");
-            if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-                return `"${str.replace(/"/g, '""')}"`;
-            }
-            return str;
-        };
-
-        const csv = [
-            headers.map(escapeCSV).join(","),
-            ...rows.map((row) => row.map(escapeCSV).join(",")),
-        ].join("\r\n");
-
-        const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `sudha-product-sheet-${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
+    if (isGlobalExport) {
+      rows.push([]);
+      rows.push([]);
     }
+    return rows;
+  }
 
-    return (
-        <main className="min-h-screen bg-slate-100 text-slate-900">
-            <header className="bg-slate-950 text-white">
-                <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-6 sm:flex-row sm:items-center sm:justify-between lg:px-8">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-xl font-black shadow-lg shadow-emerald-500/20">
-                            S
-                        </div>
-                        <div>
-                            <p className="text-lg font-bold tracking-wide">SUDHA CHEMICALS</p>
-                            <p className="text-xs text-slate-400">Product-wise Sheet</p>
-                        </div>
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                        <button
-                            onClick={exportCSV}
-                            disabled={products.length === 0}
-                            className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                            Export CSV ↓
-                        </button>
-                        <Link href="/inventory" className="rounded-xl border border-slate-700 px-5 py-3 text-sm font-semibold transition hover:bg-slate-900">
-                            Inventory Dashboard
-                        </Link>
-                    </div>
-                </div>
-            </header>
+  function exportGlobalCSV() {
+    let allRows = [];
+    excelGroups.forEach(group => {
+      allRows = allRows.concat(getGroupCSVRows(group, true));
+    });
+    const url = generateCSV(allRows);
+    downloadCSV(url, `Full-Order-Book-${new Date().toISOString().slice(0, 10)}.csv`);
+  }
 
-            <div className="mx-auto max-w-[1600px] px-4 py-8 sm:px-6 lg:px-8">
-                <div className="mb-6">
-                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
-                        Product-wise Sheet
-                    </p>
-                    <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
-                        Purchase, Sale & Stock Summary
-                    </h1>
-                    <p className="mt-2 text-sm text-slate-500">
-                        Har product ki purchase, sale, average rate, remaining qty aur profit ek hi line mein.{" "}
-                        <strong className="text-emerald-700">Details</strong> button dabao → kis company se kharida aur kis customer ko becha, sab dikhega.
-                    </p>
-                </div>
+  function exportGroupCSV(group) {
+    const rows = getGroupCSVRows(group, false);
+    const safeName = `${group.manufacturer.replace(/[^a-z0-9]/gi, '_')}${group.place ? `-${group.place.replace(/[^a-z0-9]/gi, '_')}` : ''}-${group.itemName.replace(/[^a-z0-9]/gi, '_')}`;
+    const url = generateCSV(rows);
+    downloadCSV(url, `${safeName}-${new Date().toISOString().slice(0, 10)}.csv`);
+  }
 
-                <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-                    {!ready ? (
-                        <div className="p-12 text-center text-sm text-slate-500">Loading sheet...</div>
-                    ) : products.length === 0 ? (
-                        <div className="px-6 py-16 text-center">
-                            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-3xl">📊</div>
-                            <h3 className="mt-5 text-lg font-bold">No data yet</h3>
-                            <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-                                Create purchase and sales orders to see them here.
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full min-w-[1200px] text-left text-sm">
-                                <thead>
-                                    <tr className="bg-slate-50">
-                                        <th colSpan={2} className="border-r-2 border-slate-300 px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-slate-700">
-                                            Product
-                                        </th>
-                                        <th colSpan={3} className="border-r-2 border-slate-300 px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-violet-700">
-                                            Purchase
-                                        </th>
-                                        <th colSpan={3} className="border-r-2 border-slate-300 px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-blue-700">
-                                            Sale
-                                        </th>
-                                        <th colSpan={2} className="border-r-2 border-slate-300 px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-emerald-700">
-                                            Result
-                                        </th>
-                                        <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-slate-700">
-                                            Breakdown
-                                        </th>
-                                    </tr>
-                                    <tr className="bg-slate-100 text-xs uppercase tracking-wider text-slate-600">
-                                        <th className="border-r border-slate-200 px-4 py-3 font-bold">Item Name</th>
-                                        <th className="border-r-2 border-slate-300 px-4 py-3 font-bold">Unit</th>
-                                        <th className="border-r border-slate-200 px-4 py-3 font-bold text-right">Qty</th>
-                                        <th className="border-r border-slate-200 px-4 py-3 font-bold text-right">Avg Rate</th>
-                                        <th className="border-r-2 border-slate-300 px-4 py-3 font-bold text-right">Value</th>
-                                        <th className="border-r border-slate-200 px-4 py-3 font-bold text-right">Qty</th>
-                                        <th className="border-r border-slate-200 px-4 py-3 font-bold text-right">Avg Rate</th>
-                                        <th className="border-r-2 border-slate-300 px-4 py-3 font-bold text-right">Value</th>
-                                        <th className="border-r border-slate-200 px-4 py-3 font-bold text-right">Remaining</th>
-                                        <th className="border-r-2 border-slate-300 px-4 py-3 font-bold text-right">Profit/Loss</th>
-                                        <th className="px-4 py-3 font-bold text-center">Details</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {products.map((item) => {
-                                        const isOpen = !!openProducts[item.key];
-                                        return (
-                                            <Fragment key={item.key}>
-                                                <tr className={`hover:bg-slate-50 ${isOpen ? "bg-emerald-50/40" : ""}`}>
-                                                    <td className="border-r border-slate-100 px-4 py-3 font-bold text-slate-800">
-                                                        {item.itemName}
-                                                    </td>
-                                                    <td className="border-r-2 border-slate-300 px-4 py-3 text-xs font-semibold text-slate-500">
-                                                        {item.unit}
-                                                    </td>
-                                                    <td className="border-r border-slate-100 px-4 py-3 text-right tabular-nums">
-                                                        {formatNumber(item.purchaseQty)}
-                                                    </td>
-                                                    <td className="border-r border-slate-100 px-4 py-3 text-right tabular-nums text-violet-700">
-                                                        {formatCurrency(item.avgPurchaseRate)}
-                                                    </td>
-                                                    <td className="border-r-2 border-slate-300 px-4 py-3 text-right tabular-nums font-semibold">
-                                                        {formatCurrency(item.purchaseValue)}
-                                                    </td>
-                                                    <td className="border-r border-slate-100 px-4 py-3 text-right tabular-nums">
-                                                        {formatNumber(item.saleQty)}
-                                                    </td>
-                                                    <td className="border-r border-slate-100 px-4 py-3 text-right tabular-nums text-blue-700">
-                                                        {formatCurrency(item.avgSaleRate)}
-                                                    </td>
-                                                    <td className="border-r-2 border-slate-300 px-4 py-3 text-right tabular-nums font-semibold">
-                                                        {formatCurrency(item.saleValue)}
-                                                    </td>
-                                                    <td className={`border-r border-slate-100 px-4 py-3 text-right tabular-nums font-bold ${item.remainingQty > 0 ? "text-amber-700" : item.remainingQty < 0 ? "text-red-600" : "text-slate-500"}`}>
-                                                        {formatNumber(item.remainingQty)} {item.unit}
-                                                    </td>
-                                                    <td className={`border-r-2 border-slate-300 px-4 py-3 text-right tabular-nums font-bold ${item.profit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                                                        {formatCurrency(item.profit)}
-                                                    </td>
-                                                    <td className="px-4 py-3 text-center">
-                                                        <button
-                                                            onClick={() => toggleProduct(item.key)}
-                                                            className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition ${isOpen
-                                                                ? "border-emerald-300 bg-emerald-600 text-white"
-                                                                : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
-                                                                }`}
-                                                        >
-                                                            {isOpen ? "▲ Hide" : "🔍 Details"}
-                                                        </button>
-                                                    </td>
-                                                </tr>
+  return (
+    <main className="min-h-screen bg-slate-100 text-slate-900">
+      <header className="bg-slate-950 text-white p-5">
+        <div className="max-w-[1500px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+          <h1 className="text-lg font-bold">SUDHA CHEMICALS · Order Book</h1>
+          <div className="flex gap-3">
+            <button onClick={exportGlobalCSV} disabled={excelGroups.length === 0} className="bg-emerald-600 px-5 py-2 rounded-xl text-sm font-bold hover:bg-emerald-500 disabled:opacity-50">
+              Export All Data ↓
+            </button>
+            <Link href="/inventory" className="bg-slate-800 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-700">
+              Inventory
+            </Link>
+          </div>
+        </div>
+      </header>
 
-                                                {isOpen && (
-                                                    <tr>
-                                                        <td colSpan={11} className="bg-slate-50 px-4 py-5">
-                                                            <div className="grid gap-5 lg:grid-cols-2">
-                                                                {/* ============ PURCHASE BREAKDOWN ============ */}
-                                                                <div className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
-                                                                    <div className="mb-3 flex items-center justify-between border-b border-violet-100 pb-2">
-                                                                        <h4 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-violet-700">
-                                                                            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-xs">📥</span>
-                                                                            Kahan se kharida (Companies)
-                                                                        </h4>
-                                                                        <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-700">
-                                                                            {item.purchaseRecords.length} record{item.purchaseRecords.length !== 1 ? "s" : ""}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    {item.purchaseRecords.length === 0 ? (
-                                                                        <p className="py-6 text-center text-xs text-slate-400">
-                                                                            Koi purchase record nahi
-                                                                        </p>
-                                                                    ) : (
-                                                                        <div className="space-y-2">
-                                                                            {groupBy(item.purchaseRecords, (r) => r.company).map(({ key: company, items: records }) => {
-                                                                                const companyQty = records.reduce((s, r) => s + r.qty, 0);
-                                                                                const companyValue = records.reduce((s, r) => s + r.total, 0);
-                                                                                const companyAvg = companyQty > 0 ? companyValue / companyQty : 0;
-                                                                                return (
-                                                                                    <div key={company} className="rounded-xl border border-violet-100 bg-violet-50/40 p-3">
-                                                                                        <div className="flex items-start justify-between gap-2">
-                                                                                            <div className="min-w-0">
-                                                                                                <p className="truncate text-sm font-bold text-slate-800">{company}</p>
-                                                                                                <p className="mt-0.5 text-xs text-slate-500">
-                                                                                                    {records.length} PO{records.length > 1 ? "s" : ""} · {formatNumber(companyQty)} {item.unit} · Avg {formatCurrency(companyAvg)}
-                                                                                                </p>
-                                                                                            </div>
-                                                                                            <p className="shrink-0 text-sm font-bold text-violet-700">
-                                                                                                {formatCurrency(companyValue)}
-                                                                                            </p>
-                                                                                        </div>
-
-                                                                                        <div className="mt-2 space-y-1 border-t border-violet-100 pt-2">
-                                                                                            {records.map((r) => (
-                                                                                                <div key={r.id} className="flex items-center justify-between gap-2 text-xs">
-                                                                                                    <div className="min-w-0 flex items-center gap-2">
-                                                                                                        <span className="font-mono text-[10px] font-semibold text-violet-600">{r.poNumber || "—"}</span>
-                                                                                                        <span className="text-slate-400">·</span>
-                                                                                                        <span className="tabular-nums">{formatNumber(r.qty)} {r.unit}</span>
-                                                                                                        <span className="text-slate-400">@</span>
-                                                                                                        <span className="tabular-nums">{formatCurrency(r.rate)}</span>
-                                                                                                    </div>
-                                                                                                    <span className="shrink-0 tabular-nums font-semibold text-slate-700">{formatCurrency(r.total)}</span>
-                                                                                                </div>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                );
-                                                                            })}
-
-                                                                            <div className="mt-3 rounded-xl bg-violet-600 px-3 py-2.5 text-white">
-                                                                                <div className="flex items-center justify-between text-xs font-bold">
-                                                                                    <span>📊 Total Purchase</span>
-                                                                                    <span className="tabular-nums">{formatNumber(item.purchaseQty)} {item.unit} · {formatCurrency(item.purchaseValue)}</span>
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-
-                                                                {/* ============ SALE BREAKDOWN ============ */}
-                                                                <div className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
-                                                                    <div className="mb-3 flex items-center justify-between border-b border-blue-100 pb-2">
-                                                                        <h4 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-blue-700">
-                                                                            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-xs">📤</span>
-                                                                            Kisko becha (Customers)
-                                                                        </h4>
-                                                                        <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">
-                                                                            {item.saleRecords.length} record{item.saleRecords.length !== 1 ? "s" : ""}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    {item.saleRecords.length === 0 ? (
-                                                                        <p className="py-6 text-center text-xs text-slate-400">
-                                                                            Koi sale record nahi
-                                                                        </p>
-                                                                    ) : (
-                                                                        <div className="space-y-2">
-                                                                            {groupBy(item.saleRecords, (r) => r.company).map(({ key: company, items: records }) => {
-                                                                                const companyQty = records.reduce((s, r) => s + r.qty, 0);
-                                                                                const companyValue = records.reduce((s, r) => s + r.total, 0);
-                                                                                const companyAvg = companyQty > 0 ? companyValue / companyQty : 0;
-                                                                                return (
-                                                                                    <div key={company} className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
-                                                                                        <div className="flex items-start justify-between gap-2">
-                                                                                            <div className="min-w-0">
-                                                                                                <p className="truncate text-sm font-bold text-slate-800">{company}</p>
-                                                                                                <p className="mt-0.5 text-xs text-slate-500">
-                                                                                                    {records.length} order{records.length > 1 ? "s" : ""} · {formatNumber(companyQty)} {item.unit} · Avg {formatCurrency(companyAvg)}
-                                                                                                </p>
-                                                                                            </div>
-                                                                                            <p className="shrink-0 text-sm font-bold text-blue-700">
-                                                                                                {formatCurrency(companyValue)}
-                                                                                            </p>
-                                                                                        </div>
-
-                                                                                        <div className="mt-2 space-y-1 border-t border-blue-100 pt-2">
-                                                                                            {records.map((r) => (
-                                                                                                <div key={r.id} className="flex items-center justify-between gap-2 text-xs">
-                                                                                                    <div className="min-w-0 flex items-center gap-2">
-                                                                                                        <span className="font-mono text-[10px] font-semibold text-blue-600">{r.orderNumber || "—"}</span>
-                                                                                                        <span className="text-slate-400">·</span>
-                                                                                                        <span className="truncate text-slate-600">{r.customer || "—"}</span>
-                                                                                                        <span className="text-slate-400">·</span>
-                                                                                                        <span className="tabular-nums">{formatNumber(r.qty)} {r.unit}</span>
-                                                                                                        <span className="text-slate-400">@</span>
-                                                                                                        <span className="tabular-nums">{formatCurrency(r.rate)}</span>
-                                                                                                    </div>
-                                                                                                    <span className="shrink-0 tabular-nums font-semibold text-slate-700">{formatCurrency(r.total)}</span>
-                                                                                                </div>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                );
-                                                                            })}
-
-                                                                            <div className="mt-3 rounded-xl bg-blue-600 px-3 py-2.5 text-white">
-                                                                                <div className="flex items-center justify-between text-xs font-bold">
-                                                                                    <span>📊 Total Sale</span>
-                                                                                    <span className="tabular-nums">{formatNumber(item.saleQty)} {item.unit} · {formatCurrency(item.saleValue)}</span>
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-
-                                                            {/* ---------- PROFIT SUMMARY BAR ---------- */}
-                                                            <div className={`mt-4 rounded-xl border p-3 ${item.profit >= 0 ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
-                                                                <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                                                                    <div className="flex flex-wrap items-center gap-4">
-                                                                        <span className="text-slate-600">
-                                                                            Remaining: <strong className={item.remainingQty >= 0 ? "text-amber-700" : "text-red-600"}>
-                                                                                {formatNumber(item.remainingQty)} {item.unit}
-                                                                            </strong>
-                                                                        </span>
-                                                                        <span className="text-slate-600">
-                                                                            Cost of Sold: <strong className="text-slate-800">{formatCurrency(item.saleQty * item.avgPurchaseRate)}</strong>
-                                                                        </span>
-                                                                    </div>
-                                                                    <span className={`text-base font-black ${item.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                                                                        {item.profit >= 0 ? "✓ Profit: " : "⚠ Loss: "}
-                                                                        {formatCurrency(Math.abs(item.profit))}
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </Fragment>
-                                        );
-                                    })}
-                                </tbody>
-                                <tfoot className="bg-slate-100 font-bold text-slate-800">
-                                    <tr>
-                                        <td colSpan={2} className="border-r-2 border-t border-slate-200 px-4 py-3 text-xs uppercase text-slate-700">
-                                            Grand Total (Value Only)
-                                        </td>
-                                        <td className="border-r border-t border-slate-200 px-4 py-3"></td>
-                                        <td className="border-r border-t border-slate-200 px-4 py-3"></td>
-                                        <td className="border-r-2 border-t border-slate-200 px-4 py-3 text-right tabular-nums text-violet-700">
-                                            {formatCurrency(grandTotals.purchaseValue)}
-                                        </td>
-                                        <td className="border-r border-t border-slate-200 px-4 py-3"></td>
-                                        <td className="border-r border-t border-slate-200 px-4 py-3"></td>
-                                        <td className="border-r-2 border-t border-slate-200 px-4 py-3 text-right tabular-nums text-blue-700">
-                                            {formatCurrency(grandTotals.saleValue)}
-                                        </td>
-                                        <td className="border-r border-t border-slate-200 px-4 py-3"></td>
-                                        <td className={`border-r-2 border-t border-slate-200 px-4 py-3 text-right tabular-nums ${grandTotals.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                                            {formatCurrency(grandTotals.profit)}
-                                        </td>
-                                        <td className="border-t border-slate-200 px-4 py-3"></td>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
-                    )}
-                </section>
-
-                <p className="mt-5 text-center text-xs text-slate-400">
-                    Sudha Chemicals · Product-wise Sheet
-                </p>
+      <div className="max-w-[1500px] mx-auto p-4 space-y-6">
+        
+        <section className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <input 
+              value={search} 
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="🔍 Search Manufacturer, Place, Product, PO, Customer..." 
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-violet-500" 
+            />
+            <select 
+              value={companyFilter} 
+              onChange={(e) => setCompanyFilter(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-violet-500"
+            >
+              <option value="">All Manufacturers</option>
+              {companyList.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="flex gap-2 lg:col-span-2">
+              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-violet-500" title="From Date" />
+              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-violet-500" title="To Date" />
+              <button onClick={resetFilters} className="whitespace-nowrap rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                Reset
+              </button>
             </div>
-        </main>
-    );
+          </div>
+        </section>
+
+        {!ready ? (
+          <p className="text-center p-10 font-bold text-slate-500">Loading Data...</p>
+        ) : excelGroups.length === 0 ? (
+          <div className="bg-white p-12 rounded-xl text-center shadow-sm">
+            <p className="text-lg font-bold text-slate-700">No records found</p>
+            <p className="text-sm text-slate-500 mt-2">Try changing the filters or add new purchase/sale orders.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {excelGroups.map(group => {
+              const isOpen = openGroups[group.key] !== false;
+              const balanceQty = group.totalPurchaseQty - group.totalSaleQty;
+              const avgPurchaseRate = group.totalPurchaseQty > 0 ? group.totalPurchaseValue / group.totalPurchaseQty : 0;
+              const avgSaleRate = group.totalSaleQty > 0 ? group.totalSaleValue / group.totalSaleQty : 0;
+              
+              const profit = group.totalSaleValue - (group.totalSaleQty * avgPurchaseRate);
+
+              return (
+                <div key={group.key} className="bg-white rounded-xl shadow-md overflow-hidden border border-slate-300">
+                  <div className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 border-b border-slate-200 transition">
+                    <div onClick={() => toggleGroup(group.key)} className="flex items-center gap-4 cursor-pointer flex-1 text-left">
+                      <span className="bg-slate-800 text-white w-10 h-10 flex items-center justify-center rounded-lg font-black shrink-0">
+                        {group.manufacturer.charAt(0)}
+                      </span>
+                      <div>
+                        {/* ✅ NAYA: Header me Product aur Unit add kiya */}
+                        <h2 className="text-lg font-black text-slate-800 flex flex-wrap items-center gap-2">
+                          {group.manufacturer} {group.place ? `- ${group.place}` : ""}
+                          <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded-md border border-blue-200 shadow-sm">
+                            {group.itemName} ({group.unit})
+                          </span>
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {group.purchases.length} Purchase Orders · {group.sales.length} Sale Orders · Balance: <strong className={balanceQty < 0 ? "text-red-600" : "text-emerald-600"}>{formatNum(balanceQty)} {group.unit}</strong>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          exportGroupCSV(group); 
+                        }}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition shadow-sm hidden sm:block"
+                      >
+                        Export CSV ↓
+                      </button>
+                      <span onClick={() => toggleGroup(group.key)} className="text-2xl text-slate-400 cursor-pointer px-2">
+                        {isOpen ? "▲" : "▼"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {isOpen && (
+                    <div className="overflow-x-auto">
+                      <div className="p-3 bg-white border-b border-slate-200 sm:hidden">
+                         <button onClick={() => exportGroupCSV(group)} className="w-full rounded-lg bg-slate-100 py-2 text-xs font-bold text-slate-700">
+                           Export {group.manufacturer} Data ↓
+                         </button>
+                      </div>
+
+                      <table className="w-full text-sm text-left">
+                        <thead>
+                          <tr className="bg-slate-100 text-xs uppercase text-slate-600 border-b border-slate-300">
+                            <th colSpan={5} className="px-4 py-2 text-center border-r-4 border-slate-300 bg-violet-50 text-violet-800">PURCHASE (Kharida)</th>
+                            <th colSpan={7} className="px-4 py-2 text-center bg-blue-50 text-blue-800">SALE (Becha)</th>
+                          </tr>
+                          <tr className="bg-white text-[11px] font-bold text-slate-500 border-b border-slate-300 uppercase">
+                            <th className="px-3 py-2 border-r border-slate-200">DATE</th>
+                            <th className="px-3 py-2 border-r border-slate-200">PO NO</th>
+                            <th className="px-3 py-2 border-r border-slate-200 text-right">QTY ({group.unit})</th>
+                            <th className="px-3 py-2 border-r border-slate-200 text-right">BASIC</th>
+                            <th className="px-3 py-2 border-r-4 border-slate-300 text-right">TOTAL</th>
+
+                            <th className="px-3 py-2 border-r border-slate-200">DATE</th>
+                            <th className="px-3 py-2 border-r border-slate-200">SALE NO</th>
+                            <th className="px-3 py-2 border-r border-slate-200">CUSTOMER</th>
+                            <th className="px-3 py-2 border-r border-slate-200 text-right">QTY ({group.unit})</th>
+                            <th className="px-3 py-2 border-r border-slate-200 text-right">BASIC</th>
+                            <th className="px-3 py-2 border-r border-slate-200 text-right">TOTAL</th>
+                            <th className="px-3 py-2">BROKER</th>
+                          </tr>
+                        </thead>
+
+                        <tbody className="divide-y divide-slate-100">
+                          {Array.from({ length: Math.max(group.purchases.length, group.sales.length) }).map((_, idx) => {
+                            const p = group.purchases[idx];
+                            const s = group.sales[idx];
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50">
+                                <td className="px-3 py-2 border-r border-slate-100 text-slate-500 whitespace-nowrap">{formatDate(p?.orderDate)}</td>
+                                <td className="px-3 py-2 border-r border-slate-100 font-semibold text-violet-700">{p?.purchaseOrderNumber || ""}</td>
+                                <td className="px-3 py-2 border-r border-slate-100 text-right tabular-nums">{p?.qty ? formatNum(p.qty) : ""}</td>
+                                <td className="px-3 py-2 border-r border-slate-100 text-right tabular-nums">{p?.calcRate ? formatNum(p.calcRate) : ""}</td>
+                                <td className="px-3 py-2 border-r-4 border-slate-300 text-right font-semibold tabular-nums">{p?.calcTotal ? formatNum(p.calcTotal) : ""}</td>
+
+                                <td className="px-3 py-2 border-r border-slate-100 text-slate-500 whitespace-nowrap">{formatDate(s?.orderDate)}</td>
+                                <td className="px-3 py-2 border-r border-slate-100 font-semibold text-blue-700">{s?.orderNumber || ""}</td>
+                                <td className="px-3 py-2 border-r border-slate-100">{s?.customerName || ""}</td>
+                                <td className="px-3 py-2 border-r border-slate-100 text-right tabular-nums">{s?.qty ? formatNum(s.qty) : ""}</td>
+                                <td className="px-3 py-2 border-r border-slate-100 text-right tabular-nums">{s?.calcRate ? formatNum(s.calcRate) : ""}</td>
+                                <td className="px-3 py-2 border-r border-slate-100 text-right font-semibold tabular-nums">{s?.calcTotal ? formatNum(s.calcTotal) : ""}</td>
+                                <td className="px-3 py-2 text-xs">{s?.brokerName || ""}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+
+                        <tfoot className="bg-slate-100 border-t-2 border-slate-400 font-bold text-xs">
+                          <tr>
+                            <td colSpan={2} className="px-3 py-2 border-r border-slate-300 text-right uppercase text-slate-500">TOTAL QTY:</td>
+                            <td className="px-3 py-2 border-r border-slate-300 text-right text-violet-800 tabular-nums">{formatNum(group.totalPurchaseQty)} {group.unit}</td>
+                            <td className="px-3 py-2 border-r border-slate-300 text-right text-violet-800 tabular-nums" title="Average Purchase Rate">AVG: {formatNum(avgPurchaseRate)}</td>
+                            <td className="px-3 py-2 border-r-4 border-slate-300 text-right text-violet-800 tabular-nums">{formatNum(group.totalPurchaseValue)}</td>
+
+                            <td colSpan={2} className="px-3 py-2 border-r border-slate-300 text-right uppercase text-slate-500">TOTAL QTY:</td>
+                            <td className="px-3 py-2 border-r border-slate-300"></td>
+                            <td className="px-3 py-2 border-r border-slate-300 text-right text-blue-800 tabular-nums">{formatNum(group.totalSaleQty)} {group.unit}</td>
+                            <td className="px-3 py-2 border-r border-slate-300 text-right text-blue-800 tabular-nums" title="Average Sale Rate">AVG: {formatNum(avgSaleRate)}</td>
+                            <td className="px-3 py-2 border-r border-slate-300 text-right text-blue-800 tabular-nums">{formatNum(group.totalSaleValue)}</td>
+                            <td className="px-3 py-2"></td>
+                          </tr>
+                          
+                          <tr className="bg-slate-800 text-white text-sm">
+                            <td colSpan={3} className="px-3 py-3 text-right uppercase tracking-wider text-slate-300">BALANCE QTY:</td>
+                            <td colSpan={2} className="px-3 py-3 border-r-4 border-slate-600 text-left text-lg text-amber-400">
+                              {formatNum(balanceQty)} {group.unit}
+                            </td>
+                            <td colSpan={4} className="px-3 py-3 text-right uppercase tracking-wider text-slate-300">PROFIT / LOSS:</td>
+                            <td colSpan={3} className={`px-3 py-3 text-left text-lg font-black ${profit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                              {profit >= 0 ? "+" : ""}{formatCurrency(profit)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </main>
+  );
 }

@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-const PURCHASE_KEY = "sudha_purchase_orders";
-
 function formatCurrency(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "₹0.00";
@@ -31,15 +29,22 @@ export default function CompanyPurchasesPage() {
   const [toDate, setToDate] = useState("");
   const [openCompanies, setOpenCompanies] = useState({});
 
+  // ✅ API se data fetch karna (reports se "purchases" key)
   useEffect(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(PURCHASE_KEY) || "[]");
-      setOrders(Array.isArray(raw) ? raw : []);
-    } catch {
-      setOrders([]);
-    } finally {
-      setReady(true);
+    async function fetchPurchases() {
+      try {
+        const res = await fetch('/api/reports');
+        const data = await res.json();
+        // Reports API "purchases" bhejta hai
+        setOrders(Array.isArray(data.purchases) ? data.purchases : []);
+      } catch (error) {
+        console.error("Failed to load purchases", error);
+        setOrders([]);
+      } finally {
+        setReady(true);
+      }
     }
+    fetchPurchases();
   }, []);
 
   const companyList = useMemo(() => {
@@ -57,6 +62,7 @@ export default function CompanyPurchasesPage() {
     if (to) to.setHours(23, 59, 59, 999);
 
     return orders.filter((o) => {
+      // ✅ Search me sirf place hai (destination nahi)
       const matchSearch =
         !q ||
         String(o.manufacturerName || "").toLowerCase().includes(q) ||
@@ -140,6 +146,7 @@ export default function CompanyPurchasesPage() {
   }
 
   function exportCSV() {
+    // ✅ CSV me sirf Place column hai (destination nahi)
     const headers = ["Company", "PO Number", "Order Date", "Item", "Packaging", "Qty", "Unit", "Rate", "Total", "Place", "Broker"];
     const rows = [];
     grouped.forEach((g) => {
@@ -226,7 +233,6 @@ export default function CompanyPurchasesPage() {
         </div>
 
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          {/* ✅ Status filter hata diya, ab grid lg:grid-cols-3 hai */}
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             <input value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="🔍 Search company, product, PO, place, broker..."
@@ -303,7 +309,6 @@ export default function CompanyPurchasesPage() {
                             <th className="px-4 py-3 text-right font-bold">Qty</th>
                             <th className="px-4 py-3 text-right font-bold">Rate</th>
                             <th className="px-4 py-3 text-right font-bold">Total</th>
-                            {/* ✅ Status column hata diya */}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">

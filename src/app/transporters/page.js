@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-const STORAGE_KEY = "sudha_transporter_shipments";
+const API_BASE = "/api/transporters";
 
 const companies = [
     "Sudha Chemical Company",
@@ -72,16 +72,18 @@ export default function TransportersPage() {
     const [noticeType, setNoticeType] = useState("success");
 
     useEffect(() => {
-        try {
-            const saved = JSON.parse(
-                localStorage.getItem(STORAGE_KEY) || "[]"
-            );
-
-            setShipments(Array.isArray(saved) ? saved : []);
-        } catch {
-            setShipments([]);
+        async function loadShipments() {
+            try {
+                const res = await fetch(API_BASE);
+                const json = await res.json();
+                if (json.success && Array.isArray(json.data)) {
+                    setShipments(json.data);
+                }
+            } catch (error) {
+                console.error("Failed to fetch shipments:", error);
+            }
         }
-
+        loadShipments();
     }, []);
 
     function updateField(event) {
@@ -196,7 +198,7 @@ export default function TransportersPage() {
         return next;
     }
 
-    function handleSubmit(event) {
+    async function handleSubmit(event) {
         event.preventDefault();
 
         const nextErrors = validate();
@@ -211,45 +213,36 @@ export default function TransportersPage() {
         }
 
         try {
-            const now = new Date();
+            const res = await fetch(API_BASE, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(form),
+            });
 
-            const shipment = {
-                ...form,
-                transporterCode: form.transporterCode.trim(),
-                transporterName: form.transporterName.trim(),
-                contactPerson: form.contactPerson.trim(),
-                mobile: form.mobile.trim(),
-                email: form.email.trim(),
-                vehicleNumber: form.vehicleNumber.trim(),
-                itemName: form.itemName.trim(),
-                qty: Number(form.qty),
-                freight: Number(form.freight),
-                id: `${now.getTime()}-${Math.random()
-                    .toString(36)
-                    .slice(2, 8)}`,
-                shipmentNumber: `SH-${now.getFullYear()}-${String(
-                    shipments.length + 1
-                ).padStart(4, "0")}`,
-                createdAt: now.toISOString(),
-            };
+            const json = await res.json();
 
-            const updated = [...shipments, shipment];
+            if (!res.ok || !json.success) {
+                setNoticeType("error");
+                setNotice(json.message || "Failed to save shipment.");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                return;
+            }
 
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-            setShipments(updated);
+            // Nayi list fetch karo
+            const updatedRes = await fetch(API_BASE);
+            const updatedJson = await updatedRes.json();
+            if (updatedJson.success) setShipments(updatedJson.data);
+
             setForm({ ...initialForm });
             setErrors({});
             setNoticeType("success");
-            setNotice(
-                `${shipment.shipmentNumber} saved successfully.`
-            );
-
+            setNotice(json.message);
             window.scrollTo({ top: 0, behavior: "smooth" });
-        } catch {
+
+        } catch (error) {
+            console.error(error);
             setNoticeType("error");
-            setNotice(
-                "Unable to save. Please check your browser storage."
-            );
+            setNotice("Server error. Please try again.");
         }
     }
 
@@ -355,8 +348,8 @@ export default function TransportersPage() {
                     <div
                         role={noticeType === "error" ? "alert" : "status"}
                         className={`mb-6 flex items-center justify-between gap-4 rounded-xl border bg-white p-4 shadow-sm ${noticeType === "error"
-                                ? "border-red-200 text-red-700"
-                                : "border-emerald-200 text-emerald-800"
+                            ? "border-red-200 text-red-700"
+                            : "border-emerald-200 text-emerald-800"
                             }`}
                     >
                         <p className="text-sm font-semibold">{notice}</p>

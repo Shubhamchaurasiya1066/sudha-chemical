@@ -30,15 +30,24 @@ export default function CompanySalesPage() {
   const [toDate, setToDate] = useState("");
   const [openCompanies, setOpenCompanies] = useState({});
 
-  useEffect(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(SALES_KEY) || "[]");
-      setOrders(Array.isArray(raw) ? raw : []);
-    } catch {
-      setOrders([]);
-    } finally {
-      setReady(true);
+    useEffect(() => {
+    async function fetchSales() {
+      try {
+        const res = await fetch('/api/reports');
+        const data = await res.json();
+        if (data.sales) {
+          setOrders(data.sales);
+        } else {
+          setOrders([]);
+        }
+      } catch (error) {
+        console.error("Failed to load sales", error);
+        setOrders([]);
+      } finally {
+        setReady(true);
+      }
     }
+    fetchSales();
   }, []);
 
   const companyList = useMemo(() => {

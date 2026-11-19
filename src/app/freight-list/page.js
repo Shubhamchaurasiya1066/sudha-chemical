@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 
-// ✅ NAYA: Default Transporter List
+const API_BASE = "/api/freight-list";
+
 const defaultTransporters = [
   "BDR Logistics",
   "SBT Logistics",
@@ -14,12 +15,13 @@ const defaultTransporters = [
 ];
 
 export default function FreightListPage() {
-  // --- STATES ---
   const [freights, setFreights] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [noticeType, setNoticeType] = useState("success");
   
-  // ✅ Transporter dropdown state
   const [showTransporterDropdown, setShowTransporterDropdown] = useState(false);
   const transporterWrapperRef = useRef(null);
 
@@ -33,19 +35,24 @@ export default function FreightListPage() {
     alternateNumber: "",     
   });
 
-  // Page load hone par LocalStorage se data uthana
-  useEffect(() => {
-    const saved = localStorage.getItem("freightData");
-    if (saved) {
-      try {
-        setFreights(JSON.parse(saved));
-      } catch (e) {
-        console.error("Error parsing data", e);
+  // ✅ 1. DATABASE SE DATA FETCH KARNA
+  async function fetchFreights() {
+    try {
+      const res = await fetch(API_BASE);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setFreights(json.data);
       }
+    } catch (err) {
+      console.error("Fetch error:", err);
     }
+  }
+
+  useEffect(() => {
+    fetchFreights();
   }, []);
 
-  // ✅ Bahar click karne par dropdown band karna
+  // Bahar click karne par dropdown band karna
   useEffect(() => {
     function handleClickOutside(event) {
       if (transporterWrapperRef.current && !transporterWrapperRef.current.contains(event.target)) {
@@ -56,18 +63,20 @@ export default function FreightListPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Form change handle karna
+  function showNotice(msg, type = "success") {
+    setNotice(msg);
+    setNoticeType(type);
+    setTimeout(() => setNotice(""), 4000);
+  }
+
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  // ✅ NAYA FUNCTION: Transporter select karne par details auto-fill karna
   const handleSelectTransporter = (name) => {
-    // Dhoondho ki kya is naam ka koi purana transporter data hai?
     const existingFreight = freights.find(f => f.transporterName === name);
 
     if (existingFreight) {
-      // Agar mil gaya to auto-fill karo
       setForm((prev) => ({
         ...prev,
         transporterName: name,
@@ -75,7 +84,6 @@ export default function FreightListPage() {
         alternateNumber: existingFreight.alternateNumber || "",
       }));
     } else {
-      // Agar naya naam hai to sirf naam fill karo
       setForm((prev) => ({
         ...prev,
         transporterName: name,
@@ -84,35 +92,60 @@ export default function FreightListPage() {
     setShowTransporterDropdown(false);
   };
 
-  // Data Add ya Update karna
-  const handleSubmit = (e) => {
+  // ✅ 2. ADD / UPDATE FROM API
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.fromPlace || !form.toPlace || !form.ratePerTon || !form.transporterName || !form.itemName) {
-      alert("Kripya sabhi zaroori fields bharein.");
+      showNotice("Kripya sabhi zaroori fields bharein.", "error");
       return;
     }
 
-    if (editingId) {
-      const updated = freights.map((item) =>
-        item.id === editingId ? { ...item, ...form } : item
-      );
-      setFreights(updated);
-      localStorage.setItem("freightData", JSON.stringify(updated));
-      setEditingId(null);
-    } else {
-      const newFreight = {
-        id: Date.now().toString(),
-        ...form,
-      };
-      const updated = [newFreight, ...freights];
-      setFreights(updated);
-      localStorage.setItem("freightData", JSON.stringify(updated));
-    }
+    setLoading(true);
+    try {
+      if (editingId) {
+        // UPDATE
+        const res = await fetch(`${API_BASE}?id=${editingId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+        const json = await res.json();
 
-    resetForm();
+        if (!res.ok || !json.success) {
+          showNotice(json.message || "Update failed.", "error");
+          return;
+        }
+
+        await fetchFreights();
+        setEditingId(null);
+        showNotice("Freight updated successfully!");
+      } else {
+        // ADD
+        const res = await fetch(API_BASE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+        const json = await res.json();
+
+        if (!res.ok || !json.success) {
+          showNotice(json.message || "Save failed.", "error");
+          return;
+        }
+
+        await fetchFreights();
+        showNotice("Freight added successfully!");
+      }
+
+      resetForm();
+    } catch (err) {
+      console.error(err);
+      showNotice("Server error. Please try again.", "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Edit button click
   const handleEdit = (item) => {
     setForm({
       fromPlace: item.fromPlace,
@@ -144,23 +177,34 @@ export default function FreightListPage() {
     });
   };
 
-  const handleDelete = (id) => {
-    if (confirm("Kya aap sach me ye entry delete karna chahte hain?")) {
-      const updated = freights.filter((item) => item.id !== id);
-      setFreights(updated);
-      localStorage.setItem("freightData", JSON.stringify(updated));
-      
+  // ✅ 3. DELETE FROM API
+  const handleDelete = async (id) => {
+    if (!confirm("Kya aap sach me ye entry delete karna chahte hain?")) return;
+
+    try {
+      const res = await fetch(`${API_BASE}?id=${id}`, { method: "DELETE" });
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        showNotice(json.message || "Delete failed.", "error");
+        return;
+      }
+
+      await fetchFreights();
       if (editingId === id) {
         setEditingId(null);
         resetForm();
       }
+      showNotice("Freight deleted.");
+    } catch (err) {
+      console.error(err);
+      showNotice("Server error.", "error");
     }
   };
 
   const filteredFreights = freights.filter((item) => {
     const query = searchQuery.toLowerCase();
     const placeCombined = `${item.fromPlace} - ${item.toPlace}`.toLowerCase();
-    
     const contact = (item.contactNumber || "").toLowerCase();
     const altContact = (item.alternateNumber || "").toLowerCase();
 
@@ -173,13 +217,11 @@ export default function FreightListPage() {
     );
   });
 
-  // ✅ Default list + History wale dono names milakar ek unique list
   const allTransporterNames = Array.from(new Set([
     ...defaultTransporters,
     ...freights.map(f => f.transporterName).filter(Boolean)
   ]));
 
-  // ✅ Filtered options (search text ke hisaab se)
   const filteredTransporterOptions = allTransporterNames.filter(t => 
     t.toLowerCase().includes(form.transporterName.toLowerCase())
   );
@@ -189,7 +231,6 @@ export default function FreightListPage() {
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
-      {/* HEADER */}
       <header className="bg-slate-950 text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-6 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div className="flex items-center gap-3">
@@ -211,6 +252,14 @@ export default function FreightListPage() {
           <h1 className="text-3xl font-black tracking-tight sm:text-4xl">Freight Management</h1>
           <p className="text-slate-500 mt-2">Naya freight add karein, edit karein aur search karein.</p>
         </div>
+
+        {/* NOTICE */}
+        {notice && (
+          <div className={`mb-6 flex items-center justify-between rounded-xl border bg-white p-4 text-sm font-semibold ${noticeType === "error" ? "border-red-200 text-red-700" : "border-emerald-200 text-emerald-800"}`}>
+            {notice}
+            <button onClick={() => setNotice("")} className="text-xl">×</button>
+          </div>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-3">
           
@@ -257,7 +306,6 @@ export default function FreightListPage() {
                 />
               </div>
 
-              {/* ✅ SMART TRANSPORTER INPUT */}
               <div className="relative" ref={transporterWrapperRef}>
                 <label className={labelClass}>Transporter Name</label>
                 <input
@@ -274,7 +322,7 @@ export default function FreightListPage() {
                   <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
                     {filteredTransporterOptions.length === 0 ? (
                       <div className="p-3 text-sm text-slate-400">
-                        {form.transporterName ? "No match found. You can save this as a new transporter." : "No transporters saved yet. Type to add."}
+                        {form.transporterName ? "No match found." : "No transporters saved yet."}
                       </div>
                     ) : (
                       <ul className="py-1">
@@ -331,9 +379,10 @@ export default function FreightListPage() {
               <div className="flex gap-2 mt-2">
                 <button
                   type="submit"
-                  className="w-full rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700"
+                  disabled={loading}
+                  className="w-full rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
                 >
-                  {editingId ? "Update Freight" : "Save Freight"}
+                  {loading ? "Saving..." : (editingId ? "Update Freight" : "Save Freight")}
                 </button>
                 {editingId && (
                   <button

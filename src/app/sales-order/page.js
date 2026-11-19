@@ -10,62 +10,22 @@ const companies = [
     "Nirmal Agencies Bilaspur",
 ];
 
-const manufacturerOptions = [
-    "DCM Shriram Industries Ltd.",
-    "Grassim Industries Limited",
-    "Meghmani Organics Limited",
-    "GUJRAT ALKALIES AND CHEMICALS LIMITED (GACL)",
-    "KUTCH COPPER LIMITED",
-    "Atul-Indian Chemical Company",
-    "Swastik Plasticizers",
-    "Paradeep Phosphates Limited",
-    "Lanxess-Energizing Chemistry",
-    "Khaitan Chemicals and Fertilizers Limited",
-    "Shreas Industries Limited",
-    "TGV-SRAAC Limited Sree Rayalaseema Alkalies and Allied Chemicals Limited",
-    "The Andhra Sugars Ltd.",
-    "Payal Polyplast Pvt. Ltd.",
-    "Accord Chemical Corportion",
-];
-
-const manufacturerDestinations = {
-    "DCM Shriram Industries Ltd.": ["Kota", "Jhagadia"],
-    "Grassim Industries Limited": ["Rehla", "Renukoot", "Magda"],
-    "Khaitan Chemicals and Fertilizers Limited": ["Jhansi", "Maluan", "Rajnandgoan", "Nimrani"],
-};
-
 const initialForm = {
-    companyName: "",
-    manufacturerName: "",
-    place: "",
-    qty: "",
-    qtyUnit: "KG",
-    filledBy: "",
-    ipAddress: "",
-    customerName: "",
-    customerAddress: "",
-    customerNumber: "",
-    emailId: "",
-    rate: "",
-    freight: "",
-    exFor: "",
-    paymentTerms: "",
-    itemName: "",
-    brokerName: "",
-    brokerContactNumber: "",
-    brokerEmailId: "",
-    otherPersonName: "",
-    gstExtra: false,
+    companyName: "", manufacturerName: "", place: "",
+    qty: "", qtyUnit: "KG", filledBy: "", ipAddress: "",
+    customerName: "", customerAddress: "", customerNumber: "", emailId: "",
+    rate: "", freight: "", exFor: "", paymentTerms: "", itemName: "",
+    brokerName: "", brokerContactNumber: "", brokerEmailId: "",
+    otherPersonName: "", gstExtra: false,
 };
 
-// ✅ fields array me ab sirf text/email/number fields hain (selects manual hain)
 const fields = [
     { name: "customerName", label: "Customer Name", placeholder: "Enter customer name", required: true },
     { name: "customerAddress", label: "Customer Address", placeholder: "Enter complete address", required: true, textarea: true },
     { name: "customerNumber", label: "Customer Number", placeholder: "10-digit mobile number", type: "tel", required: true },
     { name: "emailId", label: "Customer Email ID", placeholder: "customer@example.com", type: "email", required: true },
     { name: "rate", label: "Rate (₹)", placeholder: "Enter rate", type: "number", required: true },
-    { name: "freight", label: "Freight (₹)", placeholder: "Enter freight amount (optional)", type: "number", required: false },
+    { name: "freight", label: "Freight (₹)", placeholder: "Enter freight amount", type: "number", required: false },
     { name: "brokerName", label: "Broker Name", placeholder: "Enter broker name" },
     { name: "brokerContactNumber", label: "Broker Contact Number", placeholder: "10-digit mobile number", type: "tel" },
     { name: "brokerEmailId", label: "Broker Email ID", placeholder: "broker@example.com", type: "email" },
@@ -73,14 +33,9 @@ const fields = [
 
 function Field({ field, value, onChange, error }) {
     const common = {
-        id: field.name,
-        name: field.name,
-        value,
-        onChange,
-        placeholder: field.placeholder,
+        id: field.name, name: field.name, value, onChange, placeholder: field.placeholder,
         required: field.required,
-        className: `w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 ${error ? "border-red-400" : "border-slate-200"
-            }`,
+        className: `w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 ${error ? "border-red-400" : "border-slate-200"}`,
     };
 
     return (
@@ -88,18 +43,7 @@ function Field({ field, value, onChange, error }) {
             <label htmlFor={field.name} className="mb-2 block text-sm font-semibold text-slate-700">
                 {field.label} {field.required && <span className="text-red-500">*</span>}
             </label>
-
-            {field.textarea ? (
-                <textarea {...common} rows={3} />
-            ) : (
-                <input
-                    {...common}
-                    type={field.type || "text"}
-                    min={field.type === "number" ? "0" : undefined}
-                    step={field.name === "rate" || field.name === "freight" ? "0.01" : undefined}
-                />
-            )}
-
+            {field.textarea ? <textarea {...common} rows={3} /> : <input {...common} type={field.type || "text"} />}
             {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
         </div>
     );
@@ -109,6 +53,10 @@ export default function SalesOrderPage() {
     const [form, setForm] = useState(initialForm);
     const [errors, setErrors] = useState({});
     const [success, setSuccess] = useState("");
+    
+    // Stock States
+    const [stockData, setStockData] = useState([]);
+    const [loadingStock, setLoadingStock] = useState(true);
 
     useEffect(() => {
         if (!success) return;
@@ -116,22 +64,56 @@ export default function SalesOrderPage() {
         return () => window.clearTimeout(timeoutId);
     }, [success]);
 
-    const availableDestinations = form.manufacturerName
-        ? manufacturerDestinations[form.manufacturerName] || []
+    // Fetch stock data
+    useEffect(() => {
+        async function fetchStock() {
+            try {
+                const res = await fetch('/api/available-stock');
+                const data = await res.json();
+                if (data.success) setStockData(data.stock);
+            } catch (err) {
+                console.error("Stock fetch error", err);
+            } finally {
+                setLoadingStock(false);
+            }
+        }
+        fetchStock();
+    }, []);
+
+    // Derived dropdown options from stock
+    const uniqueManufacturers = Array.from(new Set(stockData.map(s => s.manufacturer))).filter(Boolean);
+    
+    const availablePlaces = form.manufacturerName 
+        ? Array.from(new Set(stockData.filter(s => s.manufacturer === form.manufacturerName).map(s => s.place))).filter(Boolean)
         : [];
 
-    const showDestinationField = availableDestinations.length > 0;
+    const availableItems = form.manufacturerName
+        ? stockData.filter(s => s.manufacturer === form.manufacturerName && (s.place === form.place || (!s.place && !form.place)))
+        : [];
+
+    // Selected item stock check
+    const selectedStock = availableItems.find(i => i.itemName === form.itemName && i.unit === form.qtyUnit);
+    const currentAvailableQty = selectedStock ? selectedStock.availableQty : 0;
+    const willBeNegative = form.qty && (currentAvailableQty - Number(form.qty) < 0);
+
+    const showDestinationField = availablePlaces.length > 0;
 
     function updateField(event) {
         const { name, value } = event.target;
-
         setForm((previous) => {
             const next = { ...previous, [name]: value };
 
             if (name === "manufacturerName") {
                 next.place = "";
+                next.itemName = "";
             }
-
+            if (name === "place") {
+                next.itemName = "";
+            }
+            if (name === "itemName") {
+                const item = availableItems.find(i => i.itemName === value);
+                if (item) next.qtyUnit = item.unit;
+            }
             if (name === "exFor" && value === "For") {
                 next.freight = "";
             }
@@ -142,7 +124,8 @@ export default function SalesOrderPage() {
         setErrors((previous) => ({
             ...previous,
             [name]: "",
-            ...(name === "manufacturerName" ? { place: "" } : {}),
+            ...(name === "manufacturerName" ? { place: "", itemName: "" } : {}),
+            ...(name === "place" ? { itemName: "" } : {}),
         }));
         setSuccess("");
     }
@@ -248,44 +231,45 @@ export default function SalesOrderPage() {
                 // Order will still be saved if IP lookup fails.
             }
 
-            const savedOrders = JSON.parse(
-                localStorage.getItem("sudha_sales_orders") || "[]"
-            );
-
-            const nextSerial =
-                savedOrders.reduce((max, order) => {
-                    const serial = Number(order.serialNo) || 0;
-                    return Math.max(max, serial);
-                }, 0) + 1;
-
-            const orderNumber = `SC-${new Date().getFullYear()}-${String(
-                nextSerial
-            ).padStart(4, "0")}`;
+            const now = new Date();
+            const nextSerial = Math.floor(Math.random() * 10000) + 1; 
+            const orderNumber = `SC-${now.getFullYear()}-${String(nextSerial).padStart(4, "0")}`;
 
             const newOrder = {
                 ...form,
                 place: showDestinationField ? form.place : "",
                 freight: form.exFor === "For" ? 0 : Number(form.freight) || 0,
                 ipAddress: capturedIpAddress,
-                serialNo: nextSerial,
                 orderNumber,
-                orderDate: new Date().toLocaleString("en-IN"),
-                id: `${Date.now()}-${nextSerial}`,
-                createdAt: new Date().toISOString(),
+                orderDate: now.toLocaleString("en-IN"),
+                id: `${now.getTime()}-${nextSerial}`,
             };
 
-            localStorage.setItem(
-                "sudha_sales_orders",
-                JSON.stringify([...savedOrders, newOrder])
-            );
+            const res = await fetch('/api/sales-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newOrder),
+            });
 
-            setForm(initialForm);
-            setErrors({});
-            setSuccess(`Sales Order ${orderNumber} submitted successfully!`);
-            window.scrollTo({ top: 0, behavior: "smooth" });
-        } catch {
+            const data = await res.json();
+
+            if (res.ok) {
+                setForm(initialForm);
+                setErrors({});
+                setSuccess(`Sales Order ${orderNumber} submitted successfully!`);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                
+                // Refresh stock
+                fetch('/api/available-stock').then(r => r.json()).then(d => {
+                    if(d.success) setStockData(d.stock);
+                });
+            } else {
+                setErrors({ form: "Database Error: " + data.error });
+            }
+
+        } catch (error) {
             setErrors({
-                form: "Unable to save this order in your browser. Please check your browser storage settings.",
+                form: "Unable to save this order. Please check your server connection.",
             });
         }
     }
@@ -450,7 +434,7 @@ export default function SalesOrderPage() {
                                             }`}
                                     >
                                         <option value="">Select manufacturer / trader</option>
-                                        {manufacturerOptions.map((manufacturer) => (
+                                        {loadingStock ? <option disabled>Loading...</option> : uniqueManufacturers.map((manufacturer) => (
                                             <option key={manufacturer} value={manufacturer}>
                                                 {manufacturer}
                                             </option>
@@ -484,7 +468,7 @@ export default function SalesOrderPage() {
                                                 }`}
                                         >
                                             <option value="">Select destination / place</option>
-                                            {availableDestinations.map((destination) => (
+                                            {availablePlaces.map((destination) => (
                                                 <option key={destination} value={destination}>
                                                     📍 {destination}
                                                 </option>
@@ -533,7 +517,6 @@ export default function SalesOrderPage() {
                                     />
                                 ))}
 
-                                {/* ✅ Naye fields Customer Details ke saath */}
                                 <div>
                                     <label htmlFor="itemName" className="mb-2 block text-sm font-semibold text-slate-700">
                                         Item / Chemical Name <span className="text-red-500">*</span>
@@ -546,25 +529,9 @@ export default function SalesOrderPage() {
                                         className={`w-full rounded-xl border bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 ${errors.itemName ? "border-red-400" : "border-slate-200"}`}
                                     >
                                         <option value="">Select chemical / product</option>
-                                        {["Sulphuric Acid (98%)",
-                                            "Hydrochloric Acid (30-33%)",
-                                            "Hydrogen Peroxide (50%)",
-                                            "Hydrogen Peroxide (60%)",
-                                            "Nitric Acid",
-                                            "Phosphoric Acid",
-                                            "Acetic Acid",
-                                            "Weak Nitric Acid",
-                                            "Methylene Dichloride (MDC)",
-                                            "Poly Alluminium Chloride (PVC)",
-                                            "Chloroform",
-                                            "Caustic Soda Lye",
-                                            "Soda Ash",
-                                            "Ethyl Acetate",
-                                            "Cuastic Soda Flakes",
-                                            "Citric Acid",
-                                            "Oleum(23%)",].map((chem) => (
-                                                <option key={chem} value={chem}>{chem}</option>
-                                            ))}
+                                        {availableItems.map((i) => (
+                                            <option key={i.itemName} value={i.itemName}>{i.itemName}</option>
+                                        ))}
                                     </select>
                                     {errors.itemName && <p className="mt-1 text-xs text-red-600">{errors.itemName}</p>}
                                 </div>
@@ -599,6 +566,13 @@ export default function SalesOrderPage() {
                                         </select>
                                     </div>
                                     {errors.qty && <p className="mt-1 text-xs text-red-600">{errors.qty}</p>}
+                                    
+                                    {/* Stock Warning */}
+                                    {selectedStock && (
+                                        <p className={`text-xs mt-1 font-bold ${willBeNegative ? "text-red-600" : "text-emerald-600"}`}>
+                                            Available: {currentAvailableQty} {form.qtyUnit} {willBeNegative && `(Warning: ${currentAvailableQty - Number(form.qty)} will remain)`}
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div>

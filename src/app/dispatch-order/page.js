@@ -3,8 +3,6 @@
 import { useRef, useState, useEffect } from "react";
 import Link from "next/link";
 
-const STORAGE_KEY = "sudha_dispatch_orders";
-
 const ITEM_OPTIONS = [
   "Sulphuric Acid (98%)",
   "Hydrochloric Acid (30-33%)",
@@ -21,7 +19,6 @@ const ITEM_OPTIONS = [
 const GODOWN_LOCATIONS = ["Main Godown", "Factory Godown", "Warehouse A", "Warehouse B"];
 const GST_OPTIONS = ["0", "5", "12", "18", "28"];
 
-// ✅ Searchable Dropdown Component
 function SearchableSelect({ options, value, onChange, placeholder = "Search item..." }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -115,16 +112,26 @@ export default function DispatchOrderPage() {
   const [orders, setOrders] = useState([]);
   const [isReady, setIsReady] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const [editingId, setEditingId] = useState(null);
 
-  useEffect(() => {
+  async function fetchOrders() {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      setOrders(Array.isArray(saved) ? saved : []);
-    } catch {
-      setOrders([]);
+      const res = await fetch('/api/dispatch-order');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.orders)) {
+        setOrders(data.orders);
+      }
+    } catch (err) {
+      console.error("Failed to fetch dispatch orders", err);
     } finally {
       setIsReady(true);
     }
+  }
+
+  useEffect(() => {
+    fetchOrders();
   }, []);
 
   function updateField(e) {
@@ -145,28 +152,52 @@ export default function DispatchOrderPage() {
     return next;
   }
 
-  // ✅ Save Order to LocalStorage
-  function saveOrder() {
+  // ✅ 1. SAVE LOGIC
+  async function saveOrder() {
+    setIsSaving(true);
     const baseAmount = Number(form.qty) * Number(form.rate);
     const gstAmount = (baseAmount * Number(form.gst)) / 100;
     const totalAmount = baseAmount + gstAmount;
 
-    const newOrder = {
-      ...form,
-      id: Date.now().toString(),
-      totalAmount,
-      createdAt: new Date().toISOString(),
-    };
+    const payload = { ...form, totalAmount };
 
-    const updated = [newOrder, ...orders];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    setOrders(updated);
-    
-    setForm(initialForm);
-    setErrors({});
+    try {
+      let res;
+      if (editingId) {
+        payload.id = editingId;
+        res = await fetch('/api/dispatch-order', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch('/api/dispatch-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        await fetchOrders();
+        setForm(initialForm);
+        setEditingId(null);
+        setErrors({});
+        alert("Order saved successfully!");
+      } else {
+        alert("Failed to save: " + (data.message || "Unknown error"));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error while saving order.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  // ✅ FIXED PDF DOWNLOAD LOGIC (Using Iframe)
+  // ✅ 2. DOWNLOAD LOGIC
   async function generatePDF(orderData) {
     setIsDownloading(true);
 
@@ -177,7 +208,6 @@ export default function DispatchOrderPage() {
       const gstAmount = (baseAmount * Number(orderData.gst)) / 100;
       const totalAmount = baseAmount + gstAmount;
 
-      // PDF HTML String
       const htmlContent = `
         <div style="font-family: 'Times New Roman', Times, serif; padding: 15mm; color: #000; background: #fff; width: 210mm; box-sizing: border-box;">
           <div style="text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 10px; margin-bottom: 20px;">
@@ -246,7 +276,6 @@ export default function DispatchOrderPage() {
         </div>
       `;
 
-      // ✅ IFRAME TRICK: Create temporary iframe to ensure browser renders the HTML fully before capturing
       const iframe = document.createElement('iframe');
       iframe.style.position = 'fixed';
       iframe.style.left = '-9999px';
@@ -260,7 +289,6 @@ export default function DispatchOrderPage() {
       iframeDoc.write(htmlContent);
       iframeDoc.close();
 
-      // Wait a moment for images/fonts (if any) to load
       await new Promise(resolve => setTimeout(resolve, 300));
 
       const opt = {
@@ -271,14 +299,9 @@ export default function DispatchOrderPage() {
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       };
 
-      // Generate PDF from the iframe's body
       await html2pdf().set(opt).from(iframeDoc.body).save();
-
-      // Cleanup
       document.body.removeChild(iframe);
-
       return true;
-
     } catch (err) {
       console.error("PDF error:", err);
       alert("Error generating PDF. Please try again.");
@@ -288,36 +311,67 @@ export default function DispatchOrderPage() {
     }
   }
 
-  // ✅ Form Submit Handler
-  async function handleSubmit(e) {
+  // ✅ 3. HANDLERS
+  async function handleSave(e) {
     e.preventDefault();
     const next = validate();
     setErrors(next);
-    
     if (Object.keys(next).length > 0) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
+    await saveOrder();
+  }
 
-    // 1. Pehle PDF Generate karo
-    const success = await generatePDF(form);
-    
-    // 2. Agar PDF ban gayi, to Save karo
-    if (success) {
-      saveOrder();
+  async function handleDownloadClick() {
+    const next = validate();
+    setErrors(next);
+    if (Object.keys(next).length > 0) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
     }
+    await generatePDF(form);
   }
 
-  // ✅ Download from History
-  async function handleDownloadFromHistory(orderData) {
-    await generatePDF(orderData);
+  function handleEdit(order) {
+    setForm({
+      date: order.date,
+      godownLocation: order.godownLocation,
+      customerName: order.customerName,
+      place: order.place,
+      itemName: order.itemName,
+      rate: order.rate,
+      gst: order.gst,
+      qty: order.qty,
+      qtyUnit: order.qtyUnit,
+      transportName: order.transportName,
+    });
+    setEditingId(order.id);
+    setErrors({});
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function handleDelete(id) {
+  function cancelEdit() {
+    setEditingId(null);
+    setForm(initialForm);
+    setErrors({});
+  }
+
+  async function handleDelete(id) {
     if (!window.confirm("Are you sure you want to delete this dispatch record?")) return;
-    const updated = orders.filter((o) => o.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    setOrders(updated);
+    try {
+      const res = await fetch(`/api/dispatch-order?id=${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        await fetchOrders();
+        if (editingId === id) cancelEdit();
+      } else {
+        alert("Failed to delete: " + (data.message || "Unknown error"));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error while deleting.");
+    }
   }
 
   function escapeHtml(str) {
@@ -347,12 +401,14 @@ export default function DispatchOrderPage() {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         
         <div className="mb-6">
-          <h1 className="text-3xl font-black tracking-tight">Create Dispatch Order</h1>
-          <p className="mt-2 text-sm text-slate-500">Fill the details, download the PDF, and it will automatically save to your records.</p>
+          <h1 className="text-3xl font-black tracking-tight">{editingId ? "Edit Dispatch Order" : "Create Dispatch Order"}</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            {editingId ? "Update the details below and save." : "Fill the details below. Aap 'Save' kar sakte hain ya direct 'Download PDF' kar sakte hain."}
+          </p>
         </div>
 
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8 mb-10">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+          <form className="space-y-6" onSubmit={handleSave}>
             
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
@@ -430,7 +486,6 @@ export default function DispatchOrderPage() {
               {errors.transportName && <p className="text-xs text-red-600 mt-1">{errors.transportName}</p>}
             </div>
 
-            {/* Live Calculation Preview */}
             <div className="rounded-xl bg-slate-50 p-4 border border-slate-200 mt-6">
               <p className="text-sm font-bold text-slate-700 mb-2">Amount Calculation:</p>
               <div className="flex justify-between text-sm py-1 border-b border-slate-200">
@@ -447,26 +502,36 @@ export default function DispatchOrderPage() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+            {/* ✅ BUTTONS SECTION */}
+            <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100">
               <button 
                 type="button" 
-                onClick={() => { setForm(initialForm); setErrors({}); }} 
+                onClick={editingId ? cancelEdit : () => { setForm(initialForm); setErrors({}); }} 
                 className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50"
               >
-                Reset
+                {editingId ? "Cancel Edit" : "Reset Form"}
               </button>
+              
+              <button 
+                type="button" 
+                onClick={handleDownloadClick}
+                disabled={isDownloading || isSaving}
+                className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isDownloading ? "⏳ Generating..." : "📥 Download PDF"}
+              </button>
+              
               <button 
                 type="submit" 
-                disabled={isDownloading}
-                className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50"
+                disabled={isSaving || isDownloading}
+                className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700 flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {isDownloading ? "⏳ Generating..." : "📥 Download PDF & Save"}
+                {isSaving ? "⏳ Saving..." : (editingId ? "💾 Update Record" : "💾 Save Record")}
               </button>
             </div>
           </form>
         </section>
 
-        {/* RECORDS SECTION */}
         <section className="rounded-2xl border border-slate-200 bg-white shadow-lg overflow-hidden">
           <div className="p-5 border-b border-slate-100 bg-slate-50">
             <h2 className="text-xl font-black text-slate-800">Dispatch Register</h2>
@@ -478,7 +543,7 @@ export default function DispatchOrderPage() {
           ) : orders.length === 0 ? (
             <div className="p-12 text-center">
               <p className="text-lg font-bold text-slate-800">No dispatches yet</p>
-              <p className="text-sm text-slate-500 mt-1">Generate a PDF to see it here.</p>
+              <p className="text-sm text-slate-500 mt-1">Save a record or generate a PDF to see it here.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -507,11 +572,17 @@ export default function DispatchOrderPage() {
                       <td className="px-5 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button 
-                            onClick={() => handleDownloadFromHistory(o)}
+                            onClick={() => handleEdit(o)}
+                            className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-100"
+                          >
+                            Edit
+                          </button>
+                          <button 
+                            onClick={() => generatePDF(o)}
                             disabled={isDownloading}
                             className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
                           >
-                            📥 PDF
+                            PDF
                           </button>
                           <button 
                             onClick={() => handleDelete(o.id)}

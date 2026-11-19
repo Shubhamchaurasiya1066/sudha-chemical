@@ -203,7 +203,7 @@ export default function PurchaseOrderPage() {
         return next;
     }
 
-    function handleSubmit(event) {
+        async function handleSubmit(event) {
         event.preventDefault();
 
         const nextErrors = validate();
@@ -216,7 +216,7 @@ export default function PurchaseOrderPage() {
         }
 
         try {
-            // ✅ Naya manufacturer save karo
+            // ✅ Naya manufacturer save karo (LocalStorage me - taaki dropdown me jaldi aaye)
             const newName = form.manufacturerName.trim();
             if (newName && !defaultManufacturers.includes(newName) && !customManufacturers.includes(newName)) {
                 const updatedCustom = [...customManufacturers, newName];
@@ -224,45 +224,47 @@ export default function PurchaseOrderPage() {
                 localStorage.setItem(CUSTOM_MANUFACTURERS_KEY, JSON.stringify(updatedCustom));
             }
 
-            const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-            const orders = Array.isArray(parsed) ? parsed : [];
-
-            const nextSerial = orders.reduce((max, order) => {
-                const match = String(order.purchaseOrderNumber || "").match(/PO-\d{4}-(\d+)/);
-                return Math.max(max, match ? Number(match[1]) : 0);
-            }, 0) + 1;
-
+            // ✅ Order Number Generate Karo
             const now = new Date();
+            const nextSerial = Math.floor(Math.random() * 10000) + 1; // Abhi ke liye random serial, aage API se laa sakte hain
             const purchaseOrderNumber = `PO-${now.getFullYear()}-${String(nextSerial).padStart(4, "0")}`;
 
+            // ✅ Payload Banao (jo API me jayega)
             const newOrder = {
                 ...form,
-                // ✅ Destination save (agar dikh rahi hai to)
                 place: showDestinationField ? form.place : "",
                 qty: Number(form.qty),
                 actualPrice: Number(form.actualPrice),
                 discount: Number(form.discount),
                 billingPrice: Number(form.billingPrice),
-                freight: 0,
-                transportName: "",
-                serialNo: nextSerial,
+                id: `${now.getTime()}-${nextSerial}`,
                 purchaseOrderNumber,
                 orderDate: now.toLocaleString("en-IN"),
-                id: `${now.getTime()}-${nextSerial}`,
-                createdAt: now.toISOString(),
             };
 
-            localStorage.setItem(STORAGE_KEY, JSON.stringify([...orders, newOrder]));
+            // ✅ API Call Karo
+            const res = await fetch('/api/purchase-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newOrder),
+            });
 
-            setForm({ ...initialForm });
-            setErrors({});
-            setNoticeType("success");
-            setNotice(`Purchase Order ${purchaseOrderNumber} saved successfully.`);
+            const data = await res.json();
 
-            window.scrollTo({ top: 0, behavior: "smooth" });
-        } catch {
+            if (res.ok) {
+                setForm({ ...initialForm });
+                setErrors({});
+                setNoticeType("success");
+                setNotice(`Purchase Order ${purchaseOrderNumber} saved successfully.`);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            } else {
+                setNoticeType("error");
+                setNotice("Database Error: " + data.error);
+            }
+
+        } catch (error) {
             setNoticeType("error");
-            setNotice("Unable to save the order. Please check browser storage settings and try again.");
+            setNotice("Unable to save the order. Please check your server connection.");
         }
     }
 
