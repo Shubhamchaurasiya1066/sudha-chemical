@@ -381,8 +381,8 @@ export default function EmployeeProfilePage() {
                 </div>
               </div>
 
-              <button type="submit" disabled={isCompressing} className="w-full bg-emerald-600 text-white font-bold py-4 rounded-xl hover:bg-emerald-700 transition disabled:opacity-50">
-                {isCompressing ? "Please Wait..." : editingOriginalId ? "Update Employee" : "Save New Employee"}
+              <button type="submit" disabled={isUploadingPhoto} className="w-full bg-emerald-600 text-white font-bold py-4 rounded-xl hover:bg-emerald-700 transition disabled:opacity-50">
+                {isUploadingPhoto ? "Uploading Photo..." : editingOriginalId ? "Update Employee" : "Save New Employee"}
               </button>
             </form>
           </div>
