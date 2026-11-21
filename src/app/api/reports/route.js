@@ -2,6 +2,7 @@
 import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/requireAuth';
+import { unstable_rethrow } from 'next/navigation';
 
 // GET: Secure purchase and sales reports
 export async function GET() {
@@ -99,6 +100,7 @@ export async function GET() {
     );
 
   } catch (error) {
+    unstable_rethrow(error);
     // Log error on server only
     console.error('Reports API Error:', error);
 

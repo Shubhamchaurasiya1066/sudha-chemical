@@ -1,9 +1,7 @@
 import { query } from '@/lib/db';
 import { requireAuth } from '@/lib/requireAuth';
 import { NextResponse } from 'next/server';
-
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+import { unstable_rethrow } from 'next/navigation';
 
 export async function GET() {
   try {
@@ -28,6 +26,7 @@ export async function GET() {
 
     return response;
   } catch (error) {
+    unstable_rethrow(error);
     console.error('Inventory API error:', error);
 
     return NextResponse.json(

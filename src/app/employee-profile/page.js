@@ -22,52 +22,6 @@ const initialProfile = {
   photo: "",
 };
 
-// Image compression
-const compressImage = (file) => {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
-      reject(new Error("Please select a valid image."));
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
-      const img = new Image();
-
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const maxSize = 500;
-
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height && width > maxSize) {
-          height = (height * maxSize) / width;
-          width = maxSize;
-        } else if (height > maxSize) {
-          width = (width * maxSize) / height;
-          height = maxSize;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-
-        resolve(canvas.toDataURL("image/jpeg", 0.65));
-      };
-
-      img.onerror = () => reject(new Error("Image could not be loaded."));
-      img.src = event.target.result;
-    };
-
-    reader.onerror = () => reject(new Error("Image reading failed."));
-    reader.readAsDataURL(file);
-  });
-};
-
 export default function EmployeeProfilePage() {
   const [profile, setProfile] = useState(initialProfile);
   const [employees, setEmployees] = useState([]);
@@ -77,7 +31,7 @@ export default function EmployeeProfilePage() {
 
   const [isSaved, setIsSaved] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCompressing, setIsCompressing] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   // ✅ Database se employees fetch karo
   useEffect(() => {
@@ -157,17 +111,51 @@ export default function EmployeeProfilePage() {
   const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) return alert("Photo size must be less than 5MB.");
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      e.target.value = "";
+      return alert("Please upload a JPG, PNG or WEBP image.");
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      e.target.value = "";
+      return alert("Photo size must be less than 5MB.");
+    }
 
     try {
-      setIsCompressing(true);
-      const compressedPhoto = await compressImage(file);
-      setProfile((prev) => ({ ...prev, photo: compressedPhoto }));
+      setIsUploadingPhoto(true);
+
+      const signatureResponse = await fetch('/api/uploads/cloudinary-signature', {
+        method: 'POST',
+      });
+      const signatureData = await signatureResponse.json();
+
+      if (!signatureResponse.ok) {
+        throw new Error(signatureData.error || 'Unable to prepare photo upload.');
+      }
+
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+      uploadData.append('api_key', signatureData.apiKey);
+      uploadData.append('timestamp', String(signatureData.timestamp));
+      uploadData.append('signature', signatureData.signature);
+      uploadData.append('folder', signatureData.folder);
+
+      const uploadResponse = await fetch(
+        `https://api.cloudinary.com/v1_1/${encodeURIComponent(signatureData.cloudName)}/image/upload`,
+        { method: 'POST', body: uploadData }
+      );
+      const uploadedImage = await uploadResponse.json();
+
+      if (!uploadResponse.ok || !uploadedImage.secure_url) {
+        throw new Error(uploadedImage.error?.message || 'Photo upload failed.');
+      }
+
+      setProfile((prev) => ({ ...prev, photo: uploadedImage.secure_url }));
       setIsSaved(false);
     } catch (error) {
-      alert("Unable to process photo.");
+      console.error('Photo upload failed', error);
+      alert(error.message || "Unable to upload photo.");
     } finally {
-      setIsCompressing(false);
+      setIsUploadingPhoto(false);
       e.target.value = "";
     }
   };
@@ -321,11 +309,11 @@ export default function EmployeeProfilePage() {
                   </div>
                   <div>
                     <label className="cursor-pointer bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-700 transition inline-block">
-                      {isCompressing ? "Processing..." : "Upload Photo"}
-                      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoUpload} disabled={isCompressing} className="hidden" />
+                      {isUploadingPhoto ? "Uploading..." : "Upload Photo"}
+                      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoUpload} disabled={isUploadingPhoto} className="hidden" />
                     </label>
                     <p className="text-xs text-slate-500 mt-2">JPG, PNG, WEBP (Max 5MB)</p>
-                    <p className="text-xs text-emerald-600 mt-1">Photo automatically compressed.</p>
+                    <p className="text-xs text-emerald-600 mt-1">Uploaded securely to Cloudinary.</p>
                   </div>
                 </div>
               </div>
