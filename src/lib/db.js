@@ -28,6 +28,6 @@ export async function query({ query, values = [] }) {
     return results;
   } catch (error) {
     console.error("Database Error:", error);
-    throw Error(error.message);
+    throw error;
   }
 }

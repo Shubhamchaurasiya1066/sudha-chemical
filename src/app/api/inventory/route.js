@@ -1,15 +1,38 @@
 import { query } from '@/lib/db';
+import { requireAuth } from '@/lib/requireAuth';
 import { NextResponse } from 'next/server';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    // Database se purchases aur sales fetch karo
-    const purchases = await query({ query: 'SELECT * FROM purchase_orders' });
-    const sales = await query({ query: 'SELECT * FROM sales_orders' });
+    const { error } = await requireAuth();
 
-    // Frontend ko data bhej do
-    return NextResponse.json({ purchases, sales }, { status: 200 });
+    if (error) return error;
+
+    const purchases = await query({
+      query: 'SELECT * FROM purchase_orders'
+    });
+
+    const sales = await query({
+      query: 'SELECT * FROM sales_orders'
+    });
+
+    const response = NextResponse.json({
+      purchases,
+      sales
+    });
+
+    response.headers.set('Cache-Control', 'no-store');
+
+    return response;
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Inventory API error:', error);
+
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

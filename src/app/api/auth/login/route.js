@@ -3,38 +3,71 @@ import { encrypt } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 
+
 export async function POST(request) {
   try {
-    const { username, password } = await request.json();
+    const body = await request.json();
+
+    const username = body?.username;
+    const password = body?.password;
+
+    if (
+      typeof username !== 'string' ||
+      typeof password !== 'string' ||
+      !username.trim() ||
+      !password
+    ) {
+      return NextResponse.json(
+        { error: 'Username and password are required' },
+        { status: 400 }
+      );
+    }
 
     const users = await query({
-      query: 'SELECT * FROM users WHERE username = ?',
-      values: [username]
+      query: `
+        SELECT id, username, name, role, password
+        FROM users
+        WHERE username = ?
+        LIMIT 1
+      `,
+      values: [username.trim()]
     });
-
-    if (users.length === 0) {
-      return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
-    }
 
     const user = users[0];
 
-    // Password check (Bcrypt ya master bypass)
-    const isMatch = await bcrypt.compare(password, user.password);
-    const isMaster = (username === 'admin' && password === 'admin123'); 
+    const validPassword =
+      user &&
+      typeof user.password === 'string' &&
+      await bcrypt.compare(password, user.password);
 
-    if (!isMatch && !isMaster) {
-      return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
+    if (!validPassword) {
+      return NextResponse.json(
+        { error: 'Invalid username or password' },
+        { status: 401 }
+      );
     }
 
-    // ✅ Token me role add karo
-    const token = await encrypt({ 
-      userId: user.id, 
-      username: user.username, 
+    const role = user.role || 'staff';
+
+    if (!['admin', 'staff'].includes(role)) {
+      return NextResponse.json(
+        { error: 'Account role is not permitted' },
+        { status: 403 }
+      );
+    }
+
+    const token = await encrypt({
+      userId: user.id,
+      username: user.username,
       name: user.name,
-      role: user.role || 'staff' // Agar role nahi hai toh staff maan lo
+      role
     });
 
-    const response = NextResponse.json({ success: true, message: 'Logged in successfully' });
+    const response = NextResponse.json({
+      success: true,
+      message: 'Logged in successfully'
+    });
+
     response.cookies.set({
       name: 'session',
       value: token,
@@ -45,8 +78,15 @@ export async function POST(request) {
       maxAge: 60 * 60 * 24 * 7
     });
 
+    response.headers.set('Cache-Control', 'no-store');
+
     return response;
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Login failed:', error);
+
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

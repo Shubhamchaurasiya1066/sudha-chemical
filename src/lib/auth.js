@@ -1,23 +1,46 @@
+import 'server-only';
 import { SignJWT, jwtVerify } from 'jose';
 
-const secretKey = process.env.JWT_SECRET || 'sudha_super_secret_key_2026';
-const key = new TextEncoder().encode(secretKey);
+function getKey() {
+  const secret = process.env.JWT_SECRET;
 
-export async function encrypt(payload) {
-  return await new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('7d') // 7 din tak login rahega
-    .sign(key);
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      'JWT_SECRET must contain at least 32 characters'
+    );
+  }
+
+  return new TextEncoder().encode(secret);
 }
 
-export async function decrypt(input) {
+export async function encrypt(payload) {
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('7d')
+    .sign(getKey());
+}
+
+export async function decrypt(token) {
+  if (!token) return null;
+
   try {
-    const { payload } = await jwtVerify(input, key, {
-      algorithms: ['HS256'],
-    });
+    const { payload } = await jwtVerify(
+      token,
+      getKey(),
+      { algorithms: ['HS256'] }
+    );
+
+    if (
+      !payload.userId ||
+      !payload.username ||
+      !['admin', 'staff'].includes(payload.role)
+    ) {
+      return null;
+    }
+
     return payload;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

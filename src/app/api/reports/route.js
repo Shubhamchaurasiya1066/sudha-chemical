@@ -1,13 +1,36 @@
+
 import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/requireAuth';
 
+// GET: Secure purchase and sales reports
 export async function GET() {
   try {
-    const purchases = await query({ query: 'SELECT * FROM purchase_orders ORDER BY created_at DESC' });
-    const sales = await query({ query: 'SELECT * FROM sales_orders ORDER BY created_at DESC' });
+    // 1. Authentication and role verification
+    const { error } = await requireAuth(['admin']);
 
-    // ✅ PURCHASE DATA (Added missing broker fields)
-    const formattedPurchases = purchases.map(row => ({
+    if (error) return error;
+
+    // 2. Fetch purchase orders
+    const purchases = await query({
+      query: `
+        SELECT *
+        FROM purchase_orders
+        ORDER BY created_at DESC
+      `
+    });
+
+    // 3. Fetch sales orders
+    const sales = await query({
+      query: `
+        SELECT *
+        FROM sales_orders
+        ORDER BY created_at DESC
+      `
+    });
+
+    // 4. Format purchase data
+    const formattedPurchases = purchases.map((row) => ({
       id: row.id,
       purchaseOrderNumber: row.po_number,
       manufacturerName: row.manufacturer_name,
@@ -21,17 +44,19 @@ export async function GET() {
       billingPrice: Number(row.billing_price),
       place: row.place || '',
       supplierEmail: row.supplier_email,
-      brokerName: row.broker_name || "",         // ✅ Added
-      brokerContact: row.broker_contact || "",   // ✅ Added
-      brokerEmail: row.broker_email || "",       // ✅ Added
-      exFor: row.ex_for || "",
-      orderDate: row.order_date || row.created_at, // ✅ Fallback date
+
+      brokerName: row.broker_name || '',
+      brokerContact: row.broker_contact || '',
+      brokerEmail: row.broker_email || '',
+
+      exFor: row.ex_for || '',
+      orderDate: row.order_date || row.created_at,
       createdAt: row.created_at,
-      status: "Completed",
+      status: 'Completed'
     }));
 
-    // ✅ SALES DATA (Added missing broker fields)
-    const formattedSales = sales.map(row => ({
+    // 5. Format sales data
+    const formattedSales = sales.map((row) => ({
       id: row.id,
       orderNumber: row.order_number,
       companyName: row.company_name,
@@ -47,17 +72,47 @@ export async function GET() {
       freight: Number(row.freight),
       place: row.place || '',
       status: row.status,
-      orderDate: row.order_date || row.created_at, // ✅ Fallback date
-      brokerName: row.broker_name || "",           // ✅ Added
-      brokerContact: row.broker_contact || "",     // ✅ Added
-      brokerEmail: row.broker_email || "",         // ✅ Added
-      filledBy: row.filled_by || "",               // ✅ Added
-      paymentTerms: row.payment_terms || "",       // ✅ Added
-      exFor: row.ex_for || "",                     // ✅ Added
+      orderDate: row.order_date || row.created_at,
+
+      brokerName: row.broker_name || '',
+      brokerContact: row.broker_contact || '',
+      brokerEmail: row.broker_email || '',
+
+      filledBy: row.filled_by || '',
+      paymentTerms: row.payment_terms || '',
+      exFor: row.ex_for || ''
     }));
 
-    return NextResponse.json({ purchases: formattedPurchases, sales: formattedSales }, { status: 200 });
+    // 6. Prevent caching of sensitive reports
+    return NextResponse.json(
+      {
+        purchases: formattedPurchases,
+        sales: formattedSales
+      },
+      {
+        status: 200,
+        headers: {
+          'Cache-Control': 'private, no-store, max-age=0',
+          'Pragma': 'no-cache'
+        }
+      }
+    );
+
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Log error on server only
+    console.error('Reports API Error:', error);
+
+    // Do not expose database details
+    return NextResponse.json(
+      {
+        error: 'Internal server error'
+      },
+      {
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-store'
+        }
+      }
+    );
   }
 }

@@ -17,6 +17,20 @@ const modules = [
   { title: "Order Book", desc: "Profit/Loss dashboard", href: "/sheet", icon: "📊", color: "from-rose-500 to-red-400" },
   { title: "Inventory", desc: "Live stock & alerts", href: "/inventory", icon: "📦", color: "from-orange-500 to-amber-400" },
   { title: "Users", desc: "Manage staff access", href: "/users", icon: "👥", color: "from-fuchsia-500 to-pink-400" },
+  {
+    title: "Employee Profile",
+    desc: "Manage employee details & records",
+    href: "/employee-profile",
+    icon: "👨‍💼",
+    color: "from-sky-500 to-blue-600"
+  },
+  {
+    title: "Salary Slip",
+    desc: "Generate & manage employee salary slips",
+    href: "/salary-slip",
+    icon: "💳",
+    color: "from-emerald-500 to-green-600"
+  },
 ];
 
 function formatCurrency(v) {
@@ -25,11 +39,11 @@ function formatCurrency(v) {
 
 export default function Home() {
   const router = useRouter();
-  
+
   // ✅ States for dynamic values
   const [year, setYear] = useState(null);
   const [currentDate, setCurrentDate] = useState("");
-  
+
   const [stats, setStats] = useState({ purchase: 0, sale: 0, profit: 0 });
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,9 +57,9 @@ export default function Home() {
       try {
         const res = await fetch('/api/reports');
         if (!res.ok) throw new Error("Failed to fetch data");
-        
+
         const data = await res.json();
-        
+
         let pTotal = 0;
         let sTotal = 0;
 
@@ -90,7 +104,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-slate-200 font-sans selection:bg-blue-500/30">
-      
+
       {/* PREMIUM HEADER */}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0B1120]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
@@ -103,8 +117,8 @@ export default function Home() {
               <p className="text-xs font-medium text-slate-400">Business Intelligence</p>
             </div>
           </div>
-          <button 
-            onClick={handleLogout} 
+          <button
+            onClick={handleLogout}
             className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-500 hover:text-white"
           >
             Logout
@@ -113,7 +127,7 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        
+
         {/* WELCOME SECTION */}
         <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
@@ -175,10 +189,10 @@ export default function Home() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tickFormatter={(val) => `₹${val / 1000}k`} tick={{ fill: '#94a3b8', fontSize: 12 }} />
-                  <Tooltip 
-                    cursor={{ fill: '#1e293b' }} 
-                    formatter={(value) => formatCurrency(value)} 
-                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff' }} 
+                  <Tooltip
+                    cursor={{ fill: '#1e293b' }}
+                    formatter={(value) => formatCurrency(value)}
+                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff' }}
                   />
                   <Bar dataKey="purchase" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} />
                   <Bar dataKey="sale" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
@@ -192,9 +206,9 @@ export default function Home() {
         <h3 className="mb-6 text-xl font-bold text-white">Quick Access</h3>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {modules.map((mod) => (
-            <Link 
-              key={mod.title} 
-              href={mod.href} 
+            <Link
+              key={mod.title}
+              href={mod.href}
               className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-white/5 bg-white/5 p-5 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/10 hover:shadow-2xl"
             >
               <div className="flex items-start justify-between">
