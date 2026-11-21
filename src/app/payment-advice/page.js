@@ -312,7 +312,7 @@ export default function PaymentAdvicePage() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link href="/payment-history" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Payment History →</Link>
-            <Link href="/" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Home</Link>
+            <Link href="/dashboard" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Home</Link>
           </div>
         </div>
       </header>

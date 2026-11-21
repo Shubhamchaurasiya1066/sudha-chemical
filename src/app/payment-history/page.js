@@ -80,7 +80,7 @@ export default function PaymentHistoryPage() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link href="/payment-advice" className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-500">+ New Payment Advice</Link>
-            <Link href="/" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Home</Link>
+            <Link href="/dashboard" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Home</Link>
           </div>
         </div>
       </header>

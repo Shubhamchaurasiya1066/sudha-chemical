@@ -241,7 +241,7 @@ export default function FreightListPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href="/" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Home</Link>
+            <Link href="/dashboard" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Home</Link>
             <Link href="/delivery-order" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold hover:bg-slate-900">Delivery Order</Link>
           </div>
         </div>

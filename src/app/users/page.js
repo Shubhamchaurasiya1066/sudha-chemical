@@ -109,7 +109,7 @@ export default function UsersPage() {
             <h1 className="text-3xl font-black text-slate-800">User Management</h1>
             <p className="text-sm text-slate-500 mt-1">Manage employee logins, roles, and passwords.</p>
           </div>
-          <Link href="/" className="bg-slate-900 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-800">
+          <Link href="/dashboard" className="bg-slate-900 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-800">
             ← Back to Home
           </Link>
         </div>

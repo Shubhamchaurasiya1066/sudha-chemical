@@ -156,7 +156,7 @@ export default function InventoryPage() {
       <header className="bg-slate-950 text-white sticky top-0 z-10 shadow-md">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <div className="flex items-center gap-3">
-            <Link href="/" className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-lg font-black shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 transition">
+            <Link href="/dashboard" className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-lg font-black shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 transition">
               S
             </Link>
             <div>

@@ -19,13 +19,21 @@ export async function middleware(request) {
 
   const isLogoutApi = path === '/api/auth/logout';
 
+  const isPublicPage =
+    path === '/' ||
+    path === '/about' ||
+    path === '/products' ||
+    path.startsWith('/products/') ||
+    path === '/clients' ||
+    path === '/contact';
+
   // Future public website endpoints
   const isPublicApi =
     path === '/api/public' ||
     path.startsWith('/api/public/');
 
   // Public endpoints ke liye authentication nahi
-  if (isLoginApi || isPublicApi) {
+  if (isLoginApi || isPublicApi || isPublicPage) {
     return NextResponse.next();
   }
 
@@ -40,7 +48,7 @@ export async function middleware(request) {
   if (isLoginPage) {
     if (session) {
       return NextResponse.redirect(
-        new URL('/', request.url)
+        new URL('/dashboard', request.url)
       );
     }
 
@@ -63,7 +71,7 @@ export async function middleware(request) {
     session.role !== 'admin'
   ) {
     return NextResponse.redirect(
-      new URL('/', request.url)
+      new URL('/dashboard', request.url)
     );
   }
 
