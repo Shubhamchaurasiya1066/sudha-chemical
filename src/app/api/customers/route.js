@@ -69,7 +69,8 @@ export async function POST(request) {
                 (customer_name, customer_type, store_contact, purchase_contact, accounts_contact, 
                 factory_address, office_address, contact_person, contact_number, alternate_number, 
                 email_id, state, city, month) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id`,
             values: [
                 customerName.trim(), customerType || 'Manufacturer',
                 storeContact || null, purchaseContact || null, accountsContact || null,
@@ -79,7 +80,7 @@ export async function POST(request) {
             ]
         });
 
-        const customerId = result.insertId;
+        const customerId = result[0].id;
 
         // 2. Items insert (agar hain)
         if (Array.isArray(items) && items.length > 0) {

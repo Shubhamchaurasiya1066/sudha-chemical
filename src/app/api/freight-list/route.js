@@ -43,7 +43,8 @@ export async function POST(request) {
         const result = await query({
             query: `INSERT INTO freights 
                 (from_place, to_place, rate_per_ton, transporter_name, item_name, contact_number, alternate_number) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id`,
             values: [
                 fromPlace.trim(), 
                 toPlace.trim(), 
@@ -58,7 +59,7 @@ export async function POST(request) {
         return NextResponse.json({ 
             success: true, 
             message: 'Freight saved successfully.',
-            insertedId: result.insertId 
+            insertedId: result[0].id
         }, { status: 201 });
     } catch (error) {
         console.error("POST Error:", error);

@@ -65,7 +65,7 @@ export async function POST(request) {
         id, orderNumber, companyName, manufacturerName, place,
         customerName, customerAddress, customerNumber, emailId,
         itemName, qty, qtyUnit, rate, freight, exFor, paymentTerms,
-        gstExtra ? 1 : 0, otherPersonName, brokerName, brokerContactNumber,
+        Boolean(gstExtra), otherPersonName, brokerName, brokerContactNumber,
         brokerEmailId, filledBy, orderDate
       ],
     });
@@ -98,7 +98,7 @@ export async function PUT(request) {
       values: [
         companyName, manufacturerName, place, customerName, customerAddress,
         customerNumber, emailId, itemName, qty, qtyUnit, rate, freight, exFor,
-        paymentTerms, gstExtra ? 1 : 0, otherPersonName, brokerName, brokerContactNumber,
+        paymentTerms, Boolean(gstExtra), otherPersonName, brokerName, brokerContactNumber,
         brokerEmailId, filledBy, id
       ],
     });

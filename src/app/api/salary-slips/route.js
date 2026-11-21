@@ -160,7 +160,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Salary Save Error:', error);
 
-    if (error.code === 'ER_DUP_ENTRY') {
+    if (error.code === '23505' || error.code === 'ER_DUP_ENTRY') {
       return NextResponse.json(
         { error: 'Salary slip already exists' },
         { status: 409 }

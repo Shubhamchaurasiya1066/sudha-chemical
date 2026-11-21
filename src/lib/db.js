@@ -1,33 +1,62 @@
-import mysql from 'mysql2/promise';
+import pg from 'pg';
 
-// Next.js development me hot-reload hone par baar-baar naye pool banne se bachane ke liye global variable use kar rahe hain
-let pool = global.mysqlPool;
+const { Pool, types } = pg;
+
+// PostgreSQL returns BIGINT values (including COUNT(*)) as strings by default.
+types.setTypeParser(20, (value) => Number(value));
+
+function sslConfig() {
+  const setting = process.env.DB_SSL?.toLowerCase();
+
+  if (['false', 'disable', 'off', '0'].includes(setting)) return false;
+
+  const host = process.env.DB_HOST || process.env.PGHOST || '';
+  if (['localhost', '127.0.0.1', '::1'].includes(host)) return false;
+
+  return {
+    rejectUnauthorized:
+      process.env.DB_SSL_REJECT_UNAUTHORIZED?.toLowerCase() === 'true',
+  };
+}
+
+let pool = global.postgresPool;
 
 if (!pool) {
-  pool = mysql.createPool({
-    host: process.env.MYSQL_HOST || 'localhost',
-    database: process.env.MYSQL_DATABASE || 'sudha_chemicals',
-    user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || '',
-    port: process.env.MYSQL_PORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10, // Ek time par max 10 connections
-    queueLimit: 0,
-    dateStrings: true, // Date ko string me return karega
+  const connectionString = process.env.DATABASE_URL;
+
+  pool = new Pool({
+    ...(connectionString
+      ? { connectionString }
+      : {
+          host: process.env.DB_HOST || process.env.PGHOST || 'localhost',
+          database: process.env.DB_DATABASE || process.env.PGDATABASE || 'sudha_chemicals',
+          user: process.env.DB_USER || process.env.PGUSER || 'postgres',
+          password: process.env.DB_PASSWORD || process.env.PGPASSWORD || '',
+          port: Number(process.env.DB_PORT || process.env.PGPORT || 5432),
+        }),
+    ssl: sslConfig(),
+    max: 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
   });
-  
+
   if (process.env.NODE_ENV !== 'production') {
-    global.mysqlPool = pool;
+    global.postgresPool = pool;
   }
 }
 
-// Aapke saare API routes isi 'query' function ko use kar rahe hain, isliye iska format same rakha hai
-export async function query({ query, values = [] }) {
+function postgresPlaceholders(sql) {
+  let index = 0;
+  return sql.replace(/\?/g, () => `$${++index}`);
+}
+
+// Preserve the existing query({ query, values }) interface used by every API.
+export async function query({ query: sql, values = [] }) {
   try {
-    const [results] = await pool.execute(query, values);
-    return results;
+    const result = await pool.query(postgresPlaceholders(sql), values);
+    return result.rows;
   } catch (error) {
-    console.error("Database Error:", error);
+    console.error('Database Error:', error);
     throw error;
   }
 }

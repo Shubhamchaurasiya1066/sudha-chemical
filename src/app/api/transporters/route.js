@@ -75,12 +75,12 @@ export async function POST(request) {
             return NextResponse.json({ success: false, message: 'This transporter code already exists.' }, { status: 409 });
         }
 
-        const countRows = await query({ query: 'SELECT COUNT(*) AS total FROM transporters WHERE YEAR(created_at) = YEAR(CURDATE())' });
+        const countRows = await query({ query: 'SELECT COUNT(*) AS total FROM transporters WHERE EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)' });
         const year = new Date().getFullYear();
         const shipmentNumber = `SH-${year}-${String(countRows[0].total + 1).padStart(4, '0')}`;
 
         const result = await query({
-            query: `INSERT INTO transporters (shipment_number, transporter_code, transporter_name, contact_person, mobile, email, vehicle_type, vehicle_number, from_company, to_company, pickup_location, delivery_location, item_name, qty, qty_unit, freight, payment_terms, dispatch_date, expected_delivery, status, remarks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            query: `INSERT INTO transporters (shipment_number, transporter_code, transporter_name, contact_person, mobile, email, vehicle_type, vehicle_number, from_company, to_company, pickup_location, delivery_location, item_name, qty, qty_unit, freight, payment_terms, dispatch_date, expected_delivery, status, remarks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
             values: [
                 shipmentNumber, transporterCode.trim(), transporterName.trim(), contactPerson.trim(), 
                 mobile.trim(), email?.trim() || null, vehicleType || 'Truck', vehicleNumber.trim(), 
@@ -90,7 +90,7 @@ export async function POST(request) {
             ]
         });
 
-        return NextResponse.json({ success: true, message: `${shipmentNumber} saved successfully.`, insertedId: result.insertId }, { status: 201 });
+        return NextResponse.json({ success: true, message: `${shipmentNumber} saved successfully.`, insertedId: result[0].id }, { status: 201 });
     } catch (error) {
         return NextResponse.json({ success: false, message: error.message }, { status: 500 });
     }
