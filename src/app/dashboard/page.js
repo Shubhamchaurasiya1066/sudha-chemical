@@ -53,42 +53,33 @@ export default function Home() {
     setYear(new Date().getFullYear());
     setCurrentDate(new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }));
 
+
     async function fetchData() {
       try {
-        const res = await fetch('/api/reports');
-        if (!res.ok) throw new Error("Failed to fetch data");
+        setLoading(true);
+
+        const res = await fetch("/api/dashboard-summary", {
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          throw new Error(`Dashboard API error: ${res.status}`);
+        }
 
         const data = await res.json();
 
-        let pTotal = 0;
-        let sTotal = 0;
-
-        (data.purchases || []).forEach(p => {
-          pTotal += (Number(p.qty) || 0) * (Number(p.billingPrice) || Number(p.actualPrice) || 0);
-        });
-
-        (data.sales || []).forEach(s => {
-          sTotal += (Number(s.qty) || 0) * (Number(s.rate) || 0);
-        });
-
         setStats({
-          purchase: pTotal,
-          sale: sTotal,
-          profit: sTotal - pTotal,
+          purchase: Number(data.purchase) || 0,
+          sale: Number(data.sale) || 0,
+          profit: Number(data.profit) || 0,
         });
-
-        setChartData([
-          { name: "Jan", purchase: pTotal * 0.2, sale: sTotal * 0.3 },
-          { name: "Feb", purchase: pTotal * 0.3, sale: sTotal * 0.25 },
-          { name: "Mar", purchase: pTotal * 0.1, sale: sTotal * 0.2 },
-          { name: "Apr", purchase: pTotal * 0.4, sale: sTotal * 0.25 },
-        ]);
-      } catch (err) {
-        console.error("Dashboard data fetch error", err);
+      } catch (error) {
+        console.error("Dashboard loading failed:", error);
       } finally {
         setLoading(false);
       }
     }
+
     fetchData();
   }, []);
 
