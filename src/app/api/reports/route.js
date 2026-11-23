@@ -8,7 +8,7 @@ import { unstable_rethrow } from 'next/navigation';
 export async function GET() {
   try {
     // 1. Authentication and role verification
-    const { error } = await requireAuth(['admin']);
+    const { error } = await requireAuth(['admin','staff']);
 
     if (error) return error;
 
