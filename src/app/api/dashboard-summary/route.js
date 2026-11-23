@@ -4,8 +4,6 @@ import { requireAuth } from "@/lib/requireAuth";
 import { NextResponse } from "next/server";
 import { unstable_rethrow } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
 export async function GET() {
   try {
     const { error } = await requireAuth(["admin", "staff"]);
