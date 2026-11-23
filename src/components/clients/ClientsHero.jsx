@@ -1,7 +1,5 @@
 
-"use client";
-
-import { motion } from "framer-motion";
+import { motion } from "@/components/ui/Motion";
 import { Building2, ArrowDownRight } from "lucide-react";
 
 export default function ClientsHero() {
@@ -28,7 +26,7 @@ export default function ClientsHero() {
 
           <p className="mt-7 max-w-3xl text-lg leading-9 text-slate-300">
             Explore the organizations listed in Sudha Chemical
-            Company's government-sector supply history,
+            Company&apos;s government-sector supply history,
             across power, energy, fertilizers and other industries.
           </p>
 

@@ -8,14 +8,23 @@ export async function GET() {
             query: 'SELECT * FROM customers ORDER BY created_at DESC' 
         });
 
-        // Har customer ke items alag se fetch karo
-        const data = await Promise.all(
-            customers.map(async (c) => {
-                const items = await query({
-                    query: 'SELECT item_name, qty, unit FROM customer_items WHERE customer_id = ?',
-                    values: [c.id]
-                });
+        const customerIds = customers.map((customer) => customer.id);
+        const allItems = customerIds.length > 0
+            ? await query({
+                query: 'SELECT customer_id, item_name, qty, unit FROM customer_items WHERE customer_id = ANY(?)',
+                values: [customerIds]
+            })
+            : [];
+        const itemsByCustomer = new Map();
+        for (const item of allItems) {
+            const key = String(item.customer_id);
+            const grouped = itemsByCustomer.get(key) || [];
+            grouped.push(item);
+            itemsByCustomer.set(key, grouped);
+        }
 
+        const data = customers.map((c) => {
+                const items = itemsByCustomer.get(String(c.id)) || [];
                 return {
                     id: c.id,
                     customerName: c.customer_name,
@@ -39,8 +48,7 @@ export async function GET() {
                     })),
                     createdAt: c.created_at,
                 };
-            })
-        );
+            });
 
         return NextResponse.json({ success: true, data });
     } catch (error) {

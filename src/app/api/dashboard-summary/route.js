@@ -9,25 +9,25 @@ export async function GET() {
     const { error } = await requireAuth(["admin", "staff"]);
     if (error) return error;
 
-    const purchases = await query({
+    const summary = await query({
       query: `
-        SELECT COALESCE(
-          SUM(qty * COALESCE(NULLIF(billing_price, 0), actual_price, 0)),
-          0
-        ) AS total
-        FROM purchase_orders
+        SELECT
+          (
+            SELECT COALESCE(
+              SUM(qty * COALESCE(NULLIF(billing_price, 0), actual_price, 0)),
+              0
+            )
+            FROM purchase_orders
+          ) AS purchase,
+          (
+            SELECT COALESCE(SUM(qty * COALESCE(rate, 0)), 0)
+            FROM sales_orders
+          ) AS sale
       `,
     });
 
-    const sales = await query({
-      query: `
-        SELECT COALESCE(SUM(qty * COALESCE(rate, 0)), 0) AS total
-        FROM sales_orders
-      `,
-    });
-
-    const purchase = Number(purchases[0]?.total || 0);
-    const sale = Number(sales[0]?.total || 0);
+    const purchase = Number(summary[0]?.purchase || 0);
+    const sale = Number(summary[0]?.sale || 0);
 
     return NextResponse.json(
       {

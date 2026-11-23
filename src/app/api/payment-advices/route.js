@@ -6,13 +6,23 @@ export async function GET() {
   try {
     const advices = await query({ query: 'SELECT * FROM payment_advices ORDER BY created_at DESC' });
     
-    // Har advice ke liye uske bills fetch karo
-    const formattedAdvices = await Promise.all(
-      advices.map(async (advice) => {
-        const bills = await query({
-          query: 'SELECT * FROM payment_bills WHERE advice_id = ?',
-          values: [advice.id],
-        });
+    const adviceIds = advices.map((advice) => advice.id);
+    const allBills = adviceIds.length > 0
+      ? await query({
+          query: 'SELECT * FROM payment_bills WHERE advice_id = ANY(?)',
+          values: [adviceIds],
+        })
+      : [];
+    const billsByAdvice = new Map();
+    for (const bill of allBills) {
+      const key = String(bill.advice_id);
+      const grouped = billsByAdvice.get(key) || [];
+      grouped.push(bill);
+      billsByAdvice.set(key, grouped);
+    }
+
+    const formattedAdvices = advices.map((advice) => {
+        const bills = billsByAdvice.get(String(advice.id)) || [];
         
         return {
           ...advice,
@@ -25,8 +35,7 @@ export async function GET() {
             tcs: b.tcs,
           })),
         };
-      })
-    );
+      });
 
     return NextResponse.json({ advices: formattedAdvices }, { status: 200 });
   } catch (error) {
@@ -53,22 +62,23 @@ export async function POST(request) {
 
     // 2. Bills save karo (agar hain to)
     if (bills && bills.length > 0) {
-      for (const bill of bills) {
-        await query({
-          query: `INSERT INTO payment_bills 
-            (advice_id, bill_no, bill_date, bill_amount, adjusted_amount, tds, tcs) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          values: [
-            id, 
-            bill.billNo, 
-            bill.billDate || null, 
-            Number(bill.billAmount) || 0, 
-            Number(bill.adjustedAmount) || 0, 
-            Number(bill.tds) || 0, 
-            Number(bill.tcs) || 0
-          ],
-        });
-      }
+      const placeholders = bills.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const values = bills.flatMap((bill) => [
+        id,
+        bill.billNo,
+        bill.billDate || null,
+        Number(bill.billAmount) || 0,
+        Number(bill.adjustedAmount) || 0,
+        Number(bill.tds) || 0,
+        Number(bill.tcs) || 0,
+      ]);
+
+      await query({
+        query: `INSERT INTO payment_bills
+          (advice_id, bill_no, bill_date, bill_amount, adjusted_amount, tds, tcs)
+          VALUES ${placeholders}`,
+        values,
+      });
     }
 
     return NextResponse.json({ message: 'Payment Advice saved successfully' }, { status: 201 });

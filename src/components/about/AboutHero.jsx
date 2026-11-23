@@ -1,8 +1,6 @@
 
-"use client";
-
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion } from "@/components/ui/Motion";
 import { ArrowRight, ChevronRight } from "lucide-react";
 
 export default function AboutHero() {

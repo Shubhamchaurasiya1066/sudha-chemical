@@ -1,8 +1,7 @@
 
-"use client";
-
 import Link from "next/link";
-import { motion } from "framer-motion";
+import Image from "next/image";
+import { motion } from "@/components/ui/Motion";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -15,13 +14,16 @@ export default function Hero() {
   return (
     <section className="relative isolate flex min-h-[85vh] items-center overflow-hidden bg-[#08111F]">
       {/* Background image */}
-      <div
-        className="absolute inset-0 -z-20 bg-cover bg-center"
-        style={{
-          backgroundImage:
-            "linear-gradient(90deg, rgba(8,17,31,0.97) 0%, rgba(8,17,31,0.85) 45%, rgba(8,17,31,0.35) 100%), url('/images/chemical-hero.jpg')",
-        }}
+      <Image
+        src="/images/chemical-hero.jpg"
+        alt=""
+        fill
+        priority
+        sizes="100vw"
+        quality={72}
+        className="-z-20 object-cover object-center"
       />
+      <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#08111F]/95 via-[#08111F]/85 to-[#08111F]/35" />
 
       {/* Decorative lighting */}
       <div className="pointer-events-none absolute -right-24 top-20 -z-10 h-96 w-96 rounded-full bg-blue-500/15 blur-[110px]" />

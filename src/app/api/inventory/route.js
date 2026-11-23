@@ -9,13 +9,10 @@ export async function GET() {
 
     if (error) return error;
 
-    const purchases = await query({
-      query: 'SELECT * FROM purchase_orders'
-    });
-
-    const sales = await query({
-      query: 'SELECT * FROM sales_orders'
-    });
+    const [purchases, sales] = await Promise.all([
+      query({ query: 'SELECT * FROM purchase_orders' }),
+      query({ query: 'SELECT * FROM sales_orders' }),
+    ]);
 
     const response = NextResponse.json({
       purchases,

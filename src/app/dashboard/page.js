@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import FinancialChart from "@/components/dashboard/FinancialChart";
 
 const modules = [
   { title: "Transporters", desc: "Manage transport & vehicles", href: "/transporters", icon: "🚚", color: "from-blue-500 to-cyan-400" },
@@ -40,19 +40,20 @@ function formatCurrency(v) {
 export default function Home() {
   const router = useRouter();
 
-  // ✅ States for dynamic values
-  const [year, setYear] = useState(null);
   const [currentDate, setCurrentDate] = useState("");
-
   const [stats, setStats] = useState({ purchase: 0, sale: 0, profit: 0 });
-  const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // ✅ Fix: Date calculation inside useEffect
-    setYear(new Date().getFullYear());
-    setCurrentDate(new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }));
-
+    const dateTimer = window.setTimeout(() => {
+      setCurrentDate(new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        timeZone: 'Asia/Kolkata',
+      }).format(new Date()));
+    }, 0);
 
     async function fetchData() {
       try {
@@ -81,6 +82,8 @@ export default function Home() {
     }
 
     fetchData();
+
+    return () => window.clearTimeout(dateTimer);
   }, []);
 
   async function handleLogout() {
@@ -123,7 +126,7 @@ export default function Home() {
         <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h2 className="text-3xl font-bold text-white">Overview Dashboard</h2>
-            <p className="mt-1 text-sm text-slate-400">Here is what's happening with your business today.</p>
+            <p className="mt-1 text-sm text-slate-400">Here is what&apos;s happening with your business today.</p>
           </div>
           <div className="flex gap-2 text-sm font-medium text-slate-400 bg-white/5 border border-white/10 px-4 py-2 rounded-lg">
             <span>📅</span> {currentDate || "Loading date..."}
@@ -172,23 +175,10 @@ export default function Home() {
             </div>
           </div>
           <div className="h-[300px] w-full">
-            {loading ? (
+{loading ? (
               <div className="flex h-full items-center justify-center text-slate-400">Loading analytics...</div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tickFormatter={(val) => `₹${val / 1000}k`} tick={{ fill: '#94a3b8', fontSize: 12 }} />
-                  <Tooltip
-                    cursor={{ fill: '#1e293b' }}
-                    formatter={(value) => formatCurrency(value)}
-                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#fff' }}
-                  />
-                  <Bar dataKey="purchase" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} />
-                  <Bar dataKey="sale" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
-                </BarChart>
-              </ResponsiveContainer>
+              <FinancialChart purchase={stats.purchase} sale={stats.sale} />
             )}
           </div>
         </div>
@@ -200,6 +190,7 @@ export default function Home() {
             <Link
               key={mod.title}
               href={mod.href}
+              prefetch={false}
               className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-white/5 bg-white/5 p-5 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/10 hover:shadow-2xl"
             >
               <div className="flex items-start justify-between">

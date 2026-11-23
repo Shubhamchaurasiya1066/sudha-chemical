@@ -1,8 +1,6 @@
 
-"use client";
-
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion } from "@/components/ui/Motion";
 import { ArrowRight, Mail, Phone } from "lucide-react";
 
 export default function ContactCTA() {
@@ -20,7 +18,7 @@ export default function ContactCTA() {
 
           <div className="relative">
             <p className="mb-4 text-sm font-bold uppercase tracking-[0.2em] text-cyan-300">
-              Let's Connect
+              Let&apos;s Connect
             </p>
 
             <h2 className="mx-auto max-w-3xl text-3xl font-black leading-tight text-white sm:text-4xl lg:text-5xl">

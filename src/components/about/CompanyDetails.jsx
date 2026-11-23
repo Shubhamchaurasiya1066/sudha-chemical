@@ -1,7 +1,5 @@
 
-"use client";
-
-import { motion } from "framer-motion";
+import { motion } from "@/components/ui/Motion";
 import {
   Building2,
   Factory,
@@ -131,7 +129,7 @@ export default function CompanyDetails() {
 
             <p className="mt-6 leading-8 text-slate-400">
               The following organizations are listed in
-              Sudha Chemical Company's supplied service history.
+              Sudha Chemical Company&apos;s supplied service history.
             </p>
           </div>
 

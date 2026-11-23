@@ -1,10 +1,17 @@
 import { query } from '@/lib/db';
-import { NextResponse } from 'next/server';
+import { connection, NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const purchases = await query({ query: 'SELECT * FROM purchase_orders' });
-    const sales = await query({ query: 'SELECT * FROM sales_orders' });
+    await connection();
+    const [purchases, sales] = await Promise.all([
+      query({
+        query: 'SELECT manufacturer_name, place, item_name, qty_unit, qty FROM purchase_orders'
+      }),
+      query({
+        query: 'SELECT manufacturer_name, place, item_name, qty_unit, qty, status FROM sales_orders'
+      }),
+    ]);
 
     const stockMap = new Map();
 

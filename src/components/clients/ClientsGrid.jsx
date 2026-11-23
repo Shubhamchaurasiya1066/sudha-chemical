@@ -2,7 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { motion } from "@/components/ui/Motion";
 import {
   Building2,
   Search,

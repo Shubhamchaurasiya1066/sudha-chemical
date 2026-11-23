@@ -1,7 +1,5 @@
 
-"use client";
-
-import { motion } from "framer-motion";
+import { motion } from "@/components/ui/Motion";
 import { Building2, CalendarDays, MapPin } from "lucide-react";
 
 const facts = [

@@ -13,22 +13,22 @@ export async function GET() {
     if (error) return error;
 
     // 2. Fetch purchase orders
-    const purchases = await query({
-      query: `
-        SELECT *
-        FROM purchase_orders
-        ORDER BY created_at DESC
-      `
-    });
-
-    // 3. Fetch sales orders
-    const sales = await query({
-      query: `
-        SELECT *
-        FROM sales_orders
-        ORDER BY created_at DESC
-      `
-    });
+    const [purchases, sales] = await Promise.all([
+      query({
+        query: `
+          SELECT *
+          FROM purchase_orders
+          ORDER BY created_at DESC
+        `
+      }),
+      query({
+        query: `
+          SELECT *
+          FROM sales_orders
+          ORDER BY created_at DESC
+        `
+      }),
+    ]);
 
     // 4. Format purchase data
     const formattedPurchases = purchases.map((row) => ({
