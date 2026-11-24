@@ -83,13 +83,27 @@ export default function SalesOrderPage() {
     // Derived dropdown options from stock
     const uniqueManufacturers = Array.from(new Set(stockData.map(s => s.manufacturer))).filter(Boolean);
     
-    const availablePlaces = form.manufacturerName 
-        ? Array.from(new Set(stockData.filter(s => s.manufacturer === form.manufacturerName).map(s => s.place))).filter(Boolean)
+    const manufacturerStock = form.manufacturerName
+        ? stockData.filter((stock) => stock.manufacturer === form.manufacturerName)
         : [];
 
-    const availableItems = form.manufacturerName
-        ? stockData.filter(s => s.manufacturer === form.manufacturerName && (s.place === form.place || (!s.place && !form.place)))
-        : [];
+    const availablePlaces = Array.from(
+        new Set(manufacturerStock.map((stock) => stock.place).filter(Boolean))
+    );
+
+    // Manufacturer select hote hi products dikhao. Place select hone ke baad
+    // list ko us place ke stock tak narrow karo.
+    const matchingStock = form.place
+        ? manufacturerStock.filter((stock) => stock.place === form.place)
+        : manufacturerStock;
+    const availableItems = Array.from(
+        new Map(
+            matchingStock.map((stock) => [
+                `${stock.itemName}::${stock.unit}`,
+                stock,
+            ])
+        ).values()
+    );
 
     // Selected item stock check
     const selectedStock = availableItems.find(i => i.itemName === form.itemName && i.unit === form.qtyUnit);
@@ -112,7 +126,22 @@ export default function SalesOrderPage() {
             }
             if (name === "itemName") {
                 const item = availableItems.find(i => i.itemName === value);
-                if (item) next.qtyUnit = item.unit;
+                if (item) {
+                    next.qtyUnit = item.unit;
+
+                    // Agar selected product sirf ek place par hai to place bhi
+                    // automatically select kar do.
+                    if (!next.place) {
+                        const itemPlaces = Array.from(
+                            new Set(
+                                manufacturerStock
+                                    .filter((stock) => stock.itemName === value && stock.place)
+                                    .map((stock) => stock.place)
+                            )
+                        );
+                        if (itemPlaces.length === 1) next.place = itemPlaces[0];
+                    }
+                }
             }
             if (name === "exFor" && value === "For") {
                 next.freight = "";
@@ -530,7 +559,9 @@ export default function SalesOrderPage() {
                                     >
                                         <option value="">Select chemical / product</option>
                                         {availableItems.map((i) => (
-                                            <option key={i.itemName} value={i.itemName}>{i.itemName}</option>
+                                            <option key={`${i.itemName}-${i.unit}`} value={i.itemName}>
+                                                {i.itemName} ({i.unit})
+                                            </option>
                                         ))}
                                     </select>
                                     {errors.itemName && <p className="mt-1 text-xs text-red-600">{errors.itemName}</p>}
@@ -637,8 +668,8 @@ export default function SalesOrderPage() {
 
                             {form.exFor === "For" && (
                                 <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
-                                    ℹ️ <strong>Ex/For = "For"</strong> selected hai. Freight field nahi dikhega.
-                                    Freight sirf tab dikhta hai jab <strong>"Ex"</strong> select karo.
+                                    ℹ️ <strong>Ex/For = &quot;For&quot;</strong> selected hai. Freight field nahi dikhega.
+                                    Freight sirf tab dikhta hai jab <strong>&quot;Ex&quot;</strong> select karo.
                                 </div>
                             )}
 
