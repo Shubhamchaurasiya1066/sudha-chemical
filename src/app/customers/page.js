@@ -3,7 +3,15 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 
-const API_BASE = "/api/customers";
+async function customerRequest(method = "GET", body, id) {
+  const res = await fetch(`/api/customers${id == null ? "" : `?id=${encodeURIComponent(id)}`}`, {
+    method, cache: "no-store", credentials: "same-origin",
+    ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.message || data.error || "Request failed");
+  return data;
+}
 
 const ITEM_OPTIONS = [
   "Sulphuric Acid (98%)",
@@ -25,16 +33,17 @@ const MONTHS = [
 
 const initialForm = {
   customerName: "",
-  customerType: "Manufacturer",
+  customerType: "Enduser",
   storeContact: "",
   purchaseContact: "",
   accountsContact: "",
   factoryAddress: "",
   officeAddress: "",
   contactPerson: "",
+  otherContactPerson: "",
   contactNumber: "",
   alternateNumber: "",
-  emailId: "",
+  emailIds: [""],
   state: "",
   city: "",
   month: MONTHS[new Date().getMonth()],
@@ -119,7 +128,6 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState([]);
   const [isReady, setIsReady] = useState(false);
   const [search, setSearch] = useState("");
-  const [saving, setSaving] = useState(false);
   
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -127,23 +135,15 @@ export default function CustomersPage() {
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState("");
 
-  // ✅ API se data fetch karna
-  async function fetchCustomers() {
-    try {
-      const res = await fetch(API_BASE);
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setCustomers(json.data);
-      }
-    } catch (err) {
-      console.error("Fetch error:", err);
-    } finally {
-      setIsReady(true);
-    }
+  const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  async function loadCustomers() {
+    const result = await customerRequest();
+    setCustomers(result.data);
+    setLoadError("");
   }
-
   useEffect(() => {
-    fetchCustomers();
+    loadCustomers().catch(e => setLoadError(e.message)).finally(() => setIsReady(true));
   }, []);
 
   useEffect(() => {
@@ -160,6 +160,7 @@ export default function CustomersPage() {
       ...(name === "customerType" && value === "Trader" 
           ? { 
               factoryAddress: "", 
+              // ✅ Trader select karne par teeno contacts clear ho jayenge
               storeContact: "",
               purchaseContact: "",
               accountsContact: "",
@@ -196,8 +197,8 @@ export default function CustomersPage() {
     if (!form.customerName.trim()) next.customerName = "Customer Name is required.";
     if (!form.officeAddress.trim()) next.officeAddress = "Office Address is required.";
     
-    if (form.customerType === "Manufacturer" && !form.factoryAddress.trim()) {
-      next.factoryAddress = "Factory Address is required for Manufacturer.";
+    if (form.customerType === "Enduser" && !form.factoryAddress.trim()) {
+      next.factoryAddress = "Factory Address is required for Enduser.";
     }
     
     if (!form.contactPerson.trim()) next.contactPerson = "Contact Person is required.";
@@ -207,7 +208,8 @@ export default function CustomersPage() {
       next.alternateNumber = "Enter a valid 10-digit number.";
     }
 
-    if (form.customerType === "Manufacturer") {
+    // Teeno department numbers ki validation (sirf Enduser ke liye)
+    if (form.customerType === "Enduser") {
       if (form.storeContact && !/^[0-9]{10}$/.test(form.storeContact.trim())) {
         next.storeContact = "Enter a valid 10-digit number.";
       }
@@ -219,10 +221,10 @@ export default function CustomersPage() {
       }
     }
     
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.emailId.trim())) {
-      next.emailId = "Enter a valid email address.";
-    }
-    
+    form.emailIds.forEach((email, i) => {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) next[`email-${i}`] = "Enter a valid email address.";
+    });
+
     if (!form.state.trim()) next.state = "State is required.";
     if (!form.city.trim()) next.city = "City is required.";
     if (!form.month) next.month = "Month is required.";
@@ -233,7 +235,7 @@ export default function CustomersPage() {
         next[`items[${idx}].itemName`] = "Item required";
         itemErrors = true;
       }
-      if (form.customerType === "Manufacturer" && (!item.qty || Number(item.qty) <= 0)) {
+      if (form.customerType === "Enduser" && (!item.qty || Number(item.qty) <= 0)) {
         next[`items[${idx}].qty`] = "Qty required";
         itemErrors = true;
       }
@@ -243,69 +245,30 @@ export default function CustomersPage() {
     return next;
   }
 
-  // ✅ Add / Update API se
   async function handleSubmit(e) {
     e.preventDefault();
+    if (busy) return;
     const next = validate();
     setErrors(next);
-    
-    if (Object.keys(next).length > 0) {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
-
-    setSaving(true);
+    if (Object.keys(next).length) return;
+    setBusy(true);
     try {
-      const finalItems = form.items.map(item => ({
-        ...item,
-        qty: form.customerType === "Manufacturer" ? item.qty : ""
-      }));
-
-      const payload = { ...form, items: finalItems };
-
-      if (editingId) {
-        // UPDATE
-        const res = await fetch(`${API_BASE}?id=${editingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.success) {
-          setNotice(json.message || "Update failed.");
-          return;
-        }
-        setNotice("Customer updated successfully!");
-      } else {
-        // ADD
-        const res = await fetch(API_BASE, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.success) {
-          setNotice(json.message || "Save failed.");
-          return;
-        }
-        setNotice("Customer added successfully!");
-      }
-
-      await fetchCustomers();
+      const payload = { ...form, emailIds: form.emailIds.map(e => e.trim()), items: form.items.map(item => ({ ...item, qty: form.customerType === "Enduser" ? item.qty : "" })) };
+      await customerRequest(editingId != null ? "PUT" : "POST", payload, editingId);
+      setNotice(editingId != null ? "Customer updated successfully!" : "Customer added successfully!");
       closeForm();
-    } catch (err) {
-      console.error(err);
-      setNotice("Server error. Please try again.");
-    } finally {
-      setSaving(false);
-    }
+      await loadCustomers().catch(e => setLoadError(e.message));
+    } catch (e) { setErrors({ form: e.message }); }
+    finally { setBusy(false); }
   }
 
   function openForm(customer = null) {
     if (customer) {
       setForm({
         ...customer,
-        items: customer.items?.length > 0 ? customer.items : [{ itemName: "", qty: "", unit: "KG" }]
+        otherContactPerson: customer.otherContactPerson || "",
+        emailIds: customer.emailIds?.length ? customer.emailIds : [customer.emailId || ""],
+        items: customer.items || [{ itemName: "", qty: "", unit: "KG" }]
       });
       setEditingId(customer.id);
     } else {
@@ -323,21 +286,15 @@ export default function CustomersPage() {
     setErrors({});
   }
 
-  // ✅ Delete API se
   async function handleDelete(id) {
-    if (!window.confirm("Are you sure you want to delete this customer?")) return;
+    if (busy || !window.confirm("Are you sure you want to delete this customer?")) return;
+    setBusy(true);
     try {
-      const res = await fetch(`${API_BASE}?id=${id}`, { method: "DELETE" });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        setNotice(json.message || "Delete failed.");
-        return;
-      }
-      await fetchCustomers();
+      await customerRequest("DELETE", undefined, id);
+      setCustomers(prev => prev.filter(c => c.id !== id));
       setNotice("Customer deleted.");
-    } catch {
-      setNotice("Failed to delete.");
-    }
+    } catch (e) { setNotice(e.message); }
+    finally { setBusy(false); }
   }
 
   const filteredCustomers = customers.filter((c) => {
@@ -352,6 +309,8 @@ export default function CustomersPage() {
     return (
       c.customerName.toLowerCase().includes(q) ||
       c.contactPerson.toLowerCase().includes(q) ||
+      (c.otherContactPerson || "").toLowerCase().includes(q) ||
+      c.emailIds?.some(email => email.toLowerCase().includes(q)) ||
       c.city?.toLowerCase().includes(q) ||
       c.state?.toLowerCase().includes(q) ||
       c.contactNumber.includes(q) ||
@@ -398,7 +357,7 @@ export default function CustomersPage() {
         </div>
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-          {!isReady ? (
+          {loadError ? (<div className="p-8 text-red-600">{loadError} <button onClick={() => loadCustomers().catch(e => setLoadError(e.message))}>Retry</button></div>) : !isReady ? (
             <div className="p-12 text-center text-slate-500">Loading...</div>
           ) : filteredCustomers.length === 0 ? (
             <div className="p-12 text-center">
@@ -422,13 +381,15 @@ export default function CustomersPage() {
                     <tr key={c.id} className="hover:bg-slate-50">
                       <td className="px-5 py-4">
                         <p className="font-bold text-slate-800">{c.customerName}</p>
-                        <span className={`inline-flex mt-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${c.customerType === 'Manufacturer' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>
+                        <span className={`inline-flex mt-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${c.customerType === 'Enduser' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>
                           {c.customerType}
                         </span>
                       </td>
                       <td className="px-5 py-4">
                         <p className="text-slate-700 font-semibold">{c.contactPerson}</p>
                         <p className="text-xs text-slate-500">{c.contactNumber}</p>
+                        {c.otherContactPerson && <p className="text-xs">Other: {c.otherContactPerson}</p>}
+                        {c.emailIds?.map((email, i) => <p key={i} className="text-xs text-emerald-700 break-all">{email}</p>)}
                         <p className="text-xs text-slate-400 mt-1">{c.city}, {c.state}</p>
                       </td>
                       
@@ -467,7 +428,7 @@ export default function CustomersPage() {
                             {c.items?.map((item, i) => (
                               <li key={i}>
                                 {item.itemName} 
-                                {item.qty && c.customerType === "Manufacturer" && (
+                                {item.qty && c.customerType === "Enduser" && (
                                   <> - <strong>{item.qty} {item.unit}</strong></>
                                 )}
                               </li>
@@ -499,6 +460,7 @@ export default function CustomersPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6">
+              {errors.form && <p className="text-red-600 mb-4">{errors.form}</p>}
               <h3 className="mb-4 text-sm font-bold uppercase tracking-wider text-emerald-700">1. Basic Details</h3>
               <div className="grid gap-5 sm:grid-cols-2">
                 <div>
@@ -508,13 +470,14 @@ export default function CustomersPage() {
                 </div>
 
                 <div>
-                  <label className={labelClass}>Trader / Manufacturer <span className="text-red-500">*</span></label>
+                  <label className={labelClass}>Trader / Enduser <span className="text-red-500">*</span></label>
                   <select name="customerType" value={form.customerType} onChange={updateField} className={inputClass}>
-                    <option value="Manufacturer">Manufacturer</option>
+                    <option value="Enduser">Enduser</option>
                     <option value="Trader">Trader</option>
                   </select>
                 </div>
 
+                {/* ✅ DEPARTMENT SECTION: SIRF Enduser KE LIYE DIKHEGA */}
                 {form.customerType !== "Trader" && (
                   <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <label className="mb-3 block text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -559,10 +522,20 @@ export default function CustomersPage() {
                   </div>
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className={labelClass}>Email ID <span className="text-red-500">*</span></label>
-                  <input name="emailId" type="email" value={form.emailId} onChange={updateField} className={inputClass} placeholder="e.g. contact@company.com" />
-                  {errors.emailId && <p className="text-xs text-red-600 mt-1">{errors.emailId}</p>}
+                <div>
+                  <label className={labelClass}>Other Contact Person</label>
+                  <input name="otherContactPerson" value={form.otherContactPerson} onChange={updateField} className={inputClass} />
+                </div>
+                <div className="sm:col-span-2 space-y-2">
+                  <label className={labelClass}>Email IDs *</label>
+                  {form.emailIds.map((email, i) => <div key={i}>
+                    <div className="flex gap-2">
+                      <input type="email" value={email} onChange={e => setForm(prev => ({ ...prev, emailIds: prev.emailIds.map((v,j) => j === i ? e.target.value : v) }))} className={inputClass} placeholder="contact@example.com" />
+                      <button type="button" disabled={form.emailIds.length === 1} onClick={() => setForm(prev => ({ ...prev, emailIds: prev.emailIds.filter((_,j) => j !== i) }))} className="rounded-lg border border-red-200 px-3 text-red-600 disabled:opacity-30">Remove</button>
+                    </div>
+                    {errors[`email-${i}`] && <p className="text-xs text-red-600">{errors[`email-${i}`]}</p>}
+                  </div>)}
+                  <button type="button" onClick={() => setForm(prev => ({ ...prev, emailIds: [...prev.emailIds, ""] }))} className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 w-full">+ Add Another Email</button>
                 </div>
               </div>
 
@@ -579,7 +552,7 @@ export default function CustomersPage() {
                   {errors.city && <p className="text-xs text-red-600 mt-1">{errors.city}</p>}
                 </div>
 
-                {form.customerType === "Manufacturer" && (
+                {form.customerType === "Enduser" && (
                   <div className="sm:col-span-2">
                     <label className={labelClass}>Factory Address <span className="text-red-500">*</span></label>
                     <textarea name="factoryAddress" value={form.factoryAddress} onChange={updateField} rows={2} className={inputClass} placeholder="Enter factory address..." />
@@ -624,7 +597,7 @@ export default function CustomersPage() {
                       {errors[`items[${index}].itemName`] && <p className="text-[10px] text-red-600 mt-1">{errors[`items[${index}].itemName`]}</p>}
                     </div>
 
-                    {form.customerType === "Manufacturer" && (
+                    {form.customerType === "Enduser" && (
                       <div className="w-full sm:w-[320px]">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Qty</label>
                         <div className="flex gap-1">
@@ -674,8 +647,8 @@ export default function CustomersPage() {
 
               <div className="mt-8 flex justify-end gap-3 border-t border-slate-100 pt-5">
                 <button type="button" onClick={closeForm} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
-                <button type="submit" disabled={saving} className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
-                  {saving ? "Saving..." : (editingId ? "Save Changes" : "Add Customer")}
+                <button type="submit" disabled={busy} className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700">
+                  {editingId ? "Save Changes" : "Add Customer"}
                 </button>
               </div>
             </form>

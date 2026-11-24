@@ -1,193 +1,68 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { requireAuth } from '@/lib/requireAuth';
+import { unstable_rethrow } from 'next/navigation';
 
-// ============ 1. GET: Saare customers + unke items fetch karna ============
+const json = (data, status = 200) => NextResponse.json(data, { status, headers: { 'Cache-Control': 'private, no-store' } });
+const fail = (error) => { unstable_rethrow(error); console.error('Customers API:', error); return json({ success: false, message: 'Customer operation failed.' }, 500); };
+const auth = () => requireAuth(['admin', 'staff']);
+
 export async function GET() {
-    try {
-        const customers = await query({ 
-            query: 'SELECT * FROM customers ORDER BY created_at DESC' 
-        });
-
-        const customerIds = customers.map((customer) => customer.id);
-        const allItems = customerIds.length > 0
-            ? await query({
-                query: 'SELECT customer_id, item_name, qty, unit FROM customer_items WHERE customer_id = ANY(?)',
-                values: [customerIds]
-            })
-            : [];
-        const itemsByCustomer = new Map();
-        for (const item of allItems) {
-            const key = String(item.customer_id);
-            const grouped = itemsByCustomer.get(key) || [];
-            grouped.push(item);
-            itemsByCustomer.set(key, grouped);
-        }
-
-        const data = customers.map((c) => {
-                const items = itemsByCustomer.get(String(c.id)) || [];
-                return {
-                    id: c.id,
-                    customerName: c.customer_name,
-                    customerType: c.customer_type,
-                    storeContact: c.store_contact || '',
-                    purchaseContact: c.purchase_contact || '',
-                    accountsContact: c.accounts_contact || '',
-                    factoryAddress: c.factory_address || '',
-                    officeAddress: c.office_address,
-                    contactPerson: c.contact_person,
-                    contactNumber: c.contact_number,
-                    alternateNumber: c.alternate_number || '',
-                    emailId: c.email_id,
-                    state: c.state,
-                    city: c.city,
-                    month: c.month,
-                    items: items.map(i => ({
-                        itemName: i.item_name,
-                        qty: i.qty == null ? '' : String(i.qty),
-                        unit: i.unit,
-                    })),
-                    createdAt: c.created_at,
-                };
-            });
-
-        return NextResponse.json({ success: true, data });
-    } catch (error) {
-        console.error("GET Error:", error);
-        return NextResponse.json({ success: false, message: error.message }, { status: 500 });
-    }
+  try {
+    const { error } = await auth(); if (error) return error;
+    const customers = await query({ query: `SELECT c.*, COALESCE((SELECT jsonb_agg(jsonb_build_object('itemName', i.item_name, 'qty', COALESCE(i.qty::text, ''), 'unit', i.unit)) FROM customer_items i WHERE i.customer_id = c.id), '[]'::jsonb) AS items FROM customers c ORDER BY c.created_at DESC` });
+    return json({ success: true, data: customers.map(c => ({
+      id: c.id, customerName: c.customer_name, customerType: c.customer_type,
+      storeContact: c.store_contact || '', purchaseContact: c.purchase_contact || '', accountsContact: c.accounts_contact || '',
+      factoryAddress: c.factory_address || '', officeAddress: c.office_address,
+      contactPerson: c.contact_person, otherContactPerson: c.other_contact_person || '',
+      contactNumber: c.contact_number, alternateNumber: c.alternate_number || '',
+      emailId: c.email_id, emailIds: c.email_ids?.length ? c.email_ids : [c.email_id],
+      state: c.state, city: c.city, month: c.month, items: c.items, createdAt: c.created_at
+    })) });
+  } catch (e) { return fail(e); }
 }
 
-// ============ 2. POST: Naya customer add karna (items ke saath) ============
+function validate(b) {
+  const text = v => typeof v === 'string' ? v.trim() : '';
+  const type = text(b.customerType) || 'Enduser';
+  const emails = Array.isArray(b.emailIds) ? b.emailIds.map(text) : [text(b.emailId)];
+  if (!['Enduser','Trader','Manufacturer'].includes(type) || !['customerName','officeAddress','contactPerson','contactNumber','state','city','month'].every(k => text(b[k])) || !emails.length || emails.some(e => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))) return null;
+  if (!/^\d{10}$/.test(text(b.contactNumber)) || (type === 'Enduser' && !text(b.factoryAddress))) return null;
+  for (const k of ['alternateNumber','storeContact','purchaseContact','accountsContact']) if (text(b[k]) && !/^\d{10}$/.test(text(b[k]))) return null;
+  if (!Array.isArray(b.items) || !b.items.length) return null;
+  const items = b.items.map(i => ({ item_name: text(i.itemName), qty: type === 'Trader' || i.qty === '' || i.qty == null ? null : Number(i.qty), unit: text(i.unit) || 'KG' }));
+  if (items.some(i => !i.item_name || !['KG','MT','L','BAG'].includes(i.unit) || (i.qty !== null && (!Number.isFinite(i.qty) || i.qty <= 0)) || (type === 'Enduser' && i.qty === null))) return null;
+  return { values: [text(b.customerName), type, text(b.storeContact)||null, text(b.purchaseContact)||null, text(b.accountsContact)||null, text(b.factoryAddress)||null, text(b.officeAddress), text(b.contactPerson), text(b.contactNumber), text(b.alternateNumber)||null, emails[0], text(b.state), text(b.city), text(b.month), text(b.otherContactPerson)||null, emails], items: JSON.stringify(items) };
+}
+const columns = 'customer_name, customer_type, store_contact, purchase_contact, accounts_contact, factory_address, office_address, contact_person, contact_number, alternate_number, email_id, state, city, month, other_contact_person, email_ids';
+const itemInsert = `INSERT INTO customer_items (customer_id, item_name, qty, unit) SELECT c.id, i.item_name, i.qty, i.unit FROM changed c CROSS JOIN jsonb_to_recordset($17::jsonb) AS i(item_name text, qty numeric, unit text)`;
+function getId(request) { const id = new URL(request.url).searchParams.get('id'); return id && /^\d+$/.test(id) && Number(id) > 0 && Number(id) <= 2147483647 ? Number(id) : null; }
+
 export async function POST(request) {
-    try {
-        const body = await request.json();
-        const {
-            customerName, customerType, storeContact, purchaseContact, accountsContact,
-            factoryAddress, officeAddress, contactPerson, contactNumber, alternateNumber,
-            emailId, state, city, month, items
-        } = body;
-
-        if (!customerName || !officeAddress || !contactPerson || !contactNumber || !emailId || !state || !city || !month) {
-            return NextResponse.json({ success: false, message: 'Required fields missing.' }, { status: 400 });
-        }
-
-        // 1. Customer insert
-        const result = await query({
-            query: `INSERT INTO customers 
-                (customer_name, customer_type, store_contact, purchase_contact, accounts_contact, 
-                factory_address, office_address, contact_person, contact_number, alternate_number, 
-                email_id, state, city, month) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                RETURNING id`,
-            values: [
-                customerName.trim(), customerType || 'Manufacturer',
-                storeContact || null, purchaseContact || null, accountsContact || null,
-                factoryAddress || null, officeAddress.trim(),
-                contactPerson.trim(), contactNumber.trim(), alternateNumber || null,
-                emailId.trim(), state.trim(), city.trim(), month
-            ]
-        });
-
-        const customerId = result[0].id;
-
-        // 2. Items insert (agar hain)
-        if (Array.isArray(items) && items.length > 0) {
-            for (const item of items) {
-                if (!item.itemName) continue;
-                await query({
-                    query: `INSERT INTO customer_items (customer_id, item_name, qty, unit) VALUES (?, ?, ?, ?)`,
-                    values: [
-                        customerId,
-                        item.itemName,
-                        item.qty === "" || item.qty == null ? null : Number(item.qty),
-                        item.unit || 'KG'
-                    ]
-                });
-            }
-        }
-
-        return NextResponse.json({ 
-            success: true, 
-            message: 'Customer added successfully.',
-            insertedId: customerId 
-        }, { status: 201 });
-    } catch (error) {
-        console.error("POST Error:", error);
-        return NextResponse.json({ success: false, message: error.message }, { status: 500 });
-    }
+  try {
+    const { error } = await auth(); if (error) return error;
+    const data = validate(await request.json()); if (!data) return json({ success: false, message: 'Invalid customer details or email IDs.' }, 400);
+    const rows = await query({ query: `WITH changed AS (INSERT INTO customers (${columns}) VALUES (${data.values.map((_,i) => `$${i+1}`).join(', ')}) RETURNING id), inserted AS (${itemInsert} RETURNING customer_id) SELECT id FROM changed`, values: [...data.values, data.items] });
+    return json({ success: true, message: 'Customer added successfully.', insertedId: rows[0].id }, 201);
+  } catch (e) { return fail(e); }
 }
 
-// ============ 3. PUT: Customer update karna ============
 export async function PUT(request) {
-    try {
-        const { searchParams } = new URL(request.url);
-        const id = searchParams.get('id');
-        if (!id) return NextResponse.json({ success: false, message: 'ID missing' }, { status: 400 });
-
-        const body = await request.json();
-        const {
-            customerName, customerType, storeContact, purchaseContact, accountsContact,
-            factoryAddress, officeAddress, contactPerson, contactNumber, alternateNumber,
-            emailId, state, city, month, items
-        } = body;
-
-        // 1. Customer update
-        await query({
-            query: `UPDATE customers SET 
-                customer_name=?, customer_type=?, store_contact=?, purchase_contact=?, accounts_contact=?, 
-                factory_address=?, office_address=?, contact_person=?, contact_number=?, alternate_number=?, 
-                email_id=?, state=?, city=?, month=? 
-                WHERE id=?`,
-            values: [
-                customerName, customerType, storeContact || null, purchaseContact || null, 
-                accountsContact || null, factoryAddress || null, officeAddress,
-                contactPerson, contactNumber, alternateNumber || null,
-                emailId, state, city, month, id
-            ]
-        });
-
-        // 2. Purane items delete karo
-        await query({
-            query: 'DELETE FROM customer_items WHERE customer_id = ?',
-            values: [id]
-        });
-
-        // 3. Naye items insert karo
-        if (Array.isArray(items) && items.length > 0) {
-            for (const item of items) {
-                if (!item.itemName) continue;
-                await query({
-                    query: `INSERT INTO customer_items (customer_id, item_name, qty, unit) VALUES (?, ?, ?, ?)`,
-                    values: [
-                        id,
-                        item.itemName,
-                        item.qty === "" || item.qty == null ? null : Number(item.qty),
-                        item.unit || 'KG'
-                    ]
-                });
-            }
-        }
-
-        return NextResponse.json({ success: true, message: 'Customer updated.' });
-    } catch (error) {
-        console.error("PUT Error:", error);
-        return NextResponse.json({ success: false, message: error.message }, { status: 500 });
-    }
+  try {
+    const { error } = await auth(); if (error) return error;
+    const id = getId(request); if (!id) return json({ success: false, message: 'Invalid ID' }, 400);
+    const data = validate(await request.json()); if (!data) return json({ success: false, message: 'Invalid customer details or email IDs.' }, 400);
+    const rows = await query({ query: `WITH changed AS (UPDATE customers SET ${columns.split(', ').map((c,i) => `${c}=$${i+1}`).join(', ')}, updated_at=CURRENT_TIMESTAMP WHERE id=$18 RETURNING id), removed AS (DELETE FROM customer_items WHERE customer_id IN (SELECT id FROM changed) RETURNING customer_id), inserted AS (${itemInsert} CROSS JOIN (SELECT count(*) FROM removed) AS dependency RETURNING customer_id) SELECT id FROM changed`, values: [...data.values, data.items, id] });
+    return rows.length ? json({ success: true, message: 'Customer updated.' }) : json({ success: false, message: 'Customer not found.' }, 404);
+  } catch (e) { return fail(e); }
 }
 
-// ============ 4. DELETE: Customer delete karna (items auto delete honge) ============
 export async function DELETE(request) {
-    try {
-        const { searchParams } = new URL(request.url);
-        const id = searchParams.get('id');
-        if (!id) return NextResponse.json({ success: false, message: 'ID missing' }, { status: 400 });
-
-        // CASCADE ki wajah se items automatically delete ho jayenge
-        await query({ query: 'DELETE FROM customers WHERE id = ?', values: [id] });
-        
-        return NextResponse.json({ success: true, message: 'Customer deleted.' });
-    } catch (error) {
-        console.error("DELETE Error:", error);
-        return NextResponse.json({ success: false, message: error.message }, { status: 500 });
-    }
+  try {
+    const { error } = await auth(); if (error) return error;
+    const id = getId(request); if (!id) return json({ success: false, message: 'Invalid ID' }, 400);
+    const rows = await query({ query: 'DELETE FROM customers WHERE id = ? RETURNING id', values: [id] });
+    return rows.length ? json({ success: true, message: 'Customer deleted.' }) : json({ success: false, message: 'Customer not found.' }, 404);
+  } catch (e) { return fail(e); }
 }
