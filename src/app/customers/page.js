@@ -69,9 +69,20 @@ function SearchableSelect({ options, value, onChange, placeholder = "Search..." 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const typedName = searchTerm.trim();
   const filteredOptions = options.filter((opt) =>
-    opt.toLowerCase().includes(searchTerm.toLowerCase())
+    opt.toLowerCase().includes(typedName.toLowerCase())
   );
+  const exactMatch = options.find(
+    (opt) => opt.toLowerCase() === typedName.toLowerCase()
+  );
+  const canAdd = Boolean(typedName && !exactMatch);
+
+  function selectProduct(name) {
+    onChange(name.trim());
+    setSearchTerm("");
+    setIsOpen(false);
+  }
 
   return (
     <div className="relative" ref={wrapperRef}>
@@ -96,7 +107,17 @@ function SearchableSelect({ options, value, onChange, placeholder = "Search..." 
               autoFocus
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search item..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (typedName) selectProduct(exactMatch || typedName);
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setIsOpen(false);
+                }
+              }}
+              placeholder="Search or type new product..."
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500"
             />
           </div>
@@ -118,6 +139,17 @@ function SearchableSelect({ options, value, onChange, placeholder = "Search..." 
               ))
             )}
           </ul>
+          {canAdd && (
+            <div className="border-t border-slate-100 p-2">
+              <button
+                type="button"
+                onClick={() => selectProduct(typedName)}
+                className="w-full break-words rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+              >
+                + Add "{typedName}"
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -296,6 +328,12 @@ export default function CustomersPage() {
     } catch (e) { setNotice(e.message); }
     finally { setBusy(false); }
   }
+
+  const productOptions = Array.from(new Map(
+    [...ITEM_OPTIONS, ...customers.flatMap(c => (c.items || []).map(i => i.itemName)), ...form.items.map(i => i.itemName)]
+      .filter(name => typeof name === "string" && name.trim())
+      .map(name => [name.trim().toLowerCase(), name.trim()])
+  ).values());
 
   const filteredCustomers = customers.filter((c) => {
     const q = search.toLowerCase();
@@ -589,10 +627,10 @@ export default function CustomersPage() {
                     <div className={form.customerType === "Trader" ? "w-[450px]" : "w-full sm:w-[750px]"}>
                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Item / Material</label>
                       <SearchableSelect 
-                        options={ITEM_OPTIONS}
+                        options={productOptions}
                         value={item.itemName}
                         onChange={(val) => handleItemChange(index, 'itemName', val)}
-                        placeholder="Search item..."
+                        placeholder="Search or add product..."
                       />
                       {errors[`items[${index}].itemName`] && <p className="text-[10px] text-red-600 mt-1">{errors[`items[${index}].itemName`]}</p>}
                     </div>
