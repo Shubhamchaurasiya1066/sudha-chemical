@@ -21,6 +21,11 @@ export default function FreightListPage() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeType, setNoticeType] = useState("success");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminAction, setAdminAction] = useState(null);
+  const [adminCredentials, setAdminCredentials] = useState({ adminId: "", adminPassword: "" });
+  const [adminError, setAdminError] = useState("");
+  const [verifyingAdmin, setVerifyingAdmin] = useState(false);
   
   const [showTransporterDropdown, setShowTransporterDropdown] = useState(false);
   const transporterWrapperRef = useRef(null);
@@ -42,6 +47,7 @@ export default function FreightListPage() {
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setFreights(json.data);
+        setIsAdmin(json.canManage === true);
       }
     } catch (err) {
       console.error("Fetch error:", err);
@@ -49,6 +55,8 @@ export default function FreightListPage() {
   }
 
   useEffect(() => {
+    // Initial API synchronization after the client component mounts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchFreights();
   }, []);
 
@@ -107,7 +115,7 @@ export default function FreightListPage() {
         const res = await fetch(`${API_BASE}?id=${editingId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: JSON.stringify({ ...form, ...adminCredentials }),
         });
         const json = await res.json();
 
@@ -118,6 +126,7 @@ export default function FreightListPage() {
 
         await fetchFreights();
         setEditingId(null);
+        setAdminCredentials({ adminId: "", adminPassword: "" });
         showNotice("Freight updated successfully!");
       } else {
         // ADD
@@ -146,7 +155,7 @@ export default function FreightListPage() {
     }
   };
 
-  const handleEdit = (item) => {
+  const beginEdit = (item) => {
     setForm({
       fromPlace: item.fromPlace,
       toPlace: item.toPlace,
@@ -160,8 +169,22 @@ export default function FreightListPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const requestAdminAction = (type, item) => {
+    setAdminAction({ type, item });
+    setAdminCredentials({ adminId: "", adminPassword: "" });
+    setAdminError("");
+  };
+
+  const closeAdminModal = () => {
+    if (verifyingAdmin) return;
+    setAdminAction(null);
+    setAdminCredentials({ adminId: "", adminPassword: "" });
+    setAdminError("");
+  };
+
   const handleCancelEdit = () => {
     setEditingId(null);
+    setAdminCredentials({ adminId: "", adminPassword: "" });
     resetForm();
   };
 
@@ -178,27 +201,59 @@ export default function FreightListPage() {
   };
 
   // ✅ 3. DELETE FROM API
-  const handleDelete = async (id) => {
-    if (!confirm("Kya aap sach me ye entry delete karna chahte hain?")) return;
+  const confirmAdminAction = async (e) => {
+    e.preventDefault();
+    if (!adminAction || !adminCredentials.adminId.trim() || !adminCredentials.adminPassword) {
+      setAdminError("Admin ID aur password dono bharein.");
+      return;
+    }
 
+    setVerifyingAdmin(true);
+    setAdminError("");
     try {
-      const res = await fetch(`${API_BASE}?id=${id}`, { method: "DELETE" });
-      const json = await res.json();
+      if (adminAction.type === "edit") {
+        const res = await fetch(API_BASE, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(adminCredentials),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          setAdminError(json.message || json.error || "Admin verification failed.");
+          return;
+        }
 
-      if (!res.ok || !json.success) {
-        showNotice(json.message || "Delete failed.", "error");
-        return;
-      }
+        const item = adminAction.item;
+        setAdminAction(null);
+        beginEdit(item);
+        showNotice("Admin verified. Ab freight edit karke update karein.");
+      } else {
+        const itemId = adminAction.item.id;
+        const res = await fetch(`${API_BASE}?id=${itemId}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(adminCredentials),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          setAdminError(json.message || json.error || "Delete failed.");
+          return;
+        }
 
-      await fetchFreights();
-      if (editingId === id) {
-        setEditingId(null);
-        resetForm();
+        await fetchFreights();
+        if (editingId === itemId) {
+          setEditingId(null);
+          resetForm();
+        }
+        setAdminAction(null);
+        setAdminCredentials({ adminId: "", adminPassword: "" });
+        showNotice("Freight deleted.");
       }
-      showNotice("Freight deleted.");
     } catch (err) {
       console.error(err);
-      showNotice("Server error.", "error");
+      setAdminError("Server error. Please try again.");
+    } finally {
+      setVerifyingAdmin(false);
     }
   };
 
@@ -250,7 +305,9 @@ export default function FreightListPage() {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-8">
           <h1 className="text-3xl font-black tracking-tight sm:text-4xl">Freight Management</h1>
-          <p className="text-slate-500 mt-2">Naya freight add karein, edit karein aur search karein.</p>
+          <p className="text-slate-500 mt-2">
+            Naya freight add aur search karein. Edit aur delete sirf admin verification ke baad available hain.
+          </p>
         </div>
 
         {/* NOTICE */}
@@ -427,13 +484,13 @@ export default function FreightListPage() {
                     <th className="px-4 py-3 font-bold whitespace-nowrap">Item Name</th>
                     <th className="px-4 py-3 font-bold whitespace-nowrap">Contact No.</th>
                     <th className="px-4 py-3 font-bold whitespace-nowrap">Alt. Number</th>
-                    <th className="px-4 py-3 font-bold text-center whitespace-nowrap">Action</th>
+                    {isAdmin && <th className="px-4 py-3 font-bold text-center whitespace-nowrap">Admin Action</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredFreights.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={isAdmin ? 7 : 6} className="px-4 py-8 text-center text-slate-400">
                         Koi data nahi mila.
                       </td>
                     </tr>
@@ -449,22 +506,24 @@ export default function FreightListPage() {
                         <td className="px-4 py-3 whitespace-nowrap">{item.contactNumber || "-"}</td>
                         <td className="px-4 py-3 whitespace-nowrap">{item.alternateNumber || "-"}</td>
 
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => handleEdit(item)}
-                              className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-100"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDelete(item.id)}
-                              className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
+                        {isAdmin && (
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => requestAdminAction("edit", item)}
+                                className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-100"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => requestAdminAction("delete", item)}
+                                className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -475,6 +534,77 @@ export default function FreightListPage() {
 
         </div>
       </div>
+
+      {adminAction && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeAdminModal();
+          }}
+        >
+          <form onSubmit={confirmAdminAction} className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Admin verification</p>
+                <h2 className="mt-1 text-2xl font-black text-slate-950">
+                  {adminAction.type === "edit" ? "Edit Freight" : "Delete Freight"}
+                </h2>
+                <p className="mt-2 text-sm text-slate-500">
+                  {adminAction.type === "edit"
+                    ? "Edit access ke liye apna admin ID aur password enter karein."
+                    : "Is entry ko delete karne ke liye apna admin ID aur password enter karein."}
+                </p>
+              </div>
+              <button type="button" onClick={closeAdminModal} className="rounded-lg px-3 py-1 text-2xl text-slate-400 hover:bg-slate-100" aria-label="Close">
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className={labelClass}>Admin ID</label>
+                <input
+                  autoFocus
+                  required
+                  autoComplete="username"
+                  value={adminCredentials.adminId}
+                  onChange={(event) => setAdminCredentials((current) => ({ ...current, adminId: event.target.value }))}
+                  className={inputClass}
+                  placeholder="Enter admin ID"
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Admin Password</label>
+                <input
+                  required
+                  type="password"
+                  autoComplete="current-password"
+                  value={adminCredentials.adminPassword}
+                  onChange={(event) => setAdminCredentials((current) => ({ ...current, adminPassword: event.target.value }))}
+                  className={inputClass}
+                  placeholder="Enter admin password"
+                />
+              </div>
+              {adminError && (
+                <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{adminError}</p>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={closeAdminModal} disabled={verifyingAdmin} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={verifyingAdmin}
+                className={`rounded-xl px-5 py-3 text-sm font-bold text-white disabled:opacity-60 ${adminAction.type === "delete" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
+              >
+                {verifyingAdmin ? "Verifying..." : adminAction.type === "edit" ? "Verify & Edit" : "Verify & Delete"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </main>
   );
 }
